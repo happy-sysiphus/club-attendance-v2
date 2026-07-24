@@ -186,6 +186,39 @@ def register_routes(app: FastAPI) -> None:
             "SELECT * FROM attendance WHERE practice_id=? AND member_id=?",
             (pid, me["id"])).fetchone(), practice)
 
+    @app.get("/practices/{pid}/board")
+    def board(pid: int, request: Request, conn=Depends(get_conn),
+              me=Depends(require_staff)):
+        practice = get_practice(conn, pid)
+        visible = db.PARTS if me["role"] == "conductor" else [me["part"]]
+        confirmed = {r["part"] for r in conn.execute(
+            "SELECT part FROM part_confirmations WHERE practice_id=?", (pid,))}
+        att_by_member = {r["member_id"]: r for r in conn.execute(
+            "SELECT * FROM attendance WHERE practice_id=?", (pid,))}
+        parts, totals = {}, {"present": 0, "late": 0, "absent": 0, "unconfirmed": 0}
+        for part in visible:
+            members, counts = [], {"present": 0, "late": 0, "absent": 0,
+                                   "unconfirmed": 0}
+            rows = conn.execute(
+                "SELECT * FROM members WHERE part=? AND active=1 ORDER BY name",
+                (part,)).fetchall()
+            for m in rows:
+                eff = effective_row(att_by_member.get(m["id"]), practice)
+                counts[eff["status"] or "unconfirmed"] += 1
+                members.append({"member_id": m["id"], "name": m["name"], **eff})
+            for k in totals:
+                totals[k] += counts[k]
+            parts[part] = {"confirmed": part in confirmed,
+                           "counts": counts, "members": members}
+        return {"practice": {"id": practice["id"], "title": practice["title"],
+                             "starts_at": practice["starts_at"],
+                             "place": practice["place"],
+                             "status": practice["status"],
+                             "notion_synced_at": practice["notion_synced_at"]},
+                "parts": parts, "totals": totals,
+                "roster_warnings": (request.app.state.roster_warnings
+                                    if me["role"] == "conductor" else [])}
+
 
 if __name__ == "__main__":
     import uvicorn
