@@ -127,6 +127,8 @@ def register_routes(app: FastAPI) -> None:
                         _=Depends(require_conductor)):
         if get_practice(conn, pid)["status"] != "open":
             raise HTTPException(409, "마감된 연습")
+        if not body.title.strip():
+            raise HTTPException(422, "title 필수")
         conn.execute(
             "UPDATE practices SET title=?, starts_at=?, place=? WHERE id=?",
             (body.title.strip(), parse_starts_at(body.starts_at), body.place, pid))

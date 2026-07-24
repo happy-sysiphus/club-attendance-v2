@@ -29,6 +29,17 @@ def test_list_visible_to_member(client):
     assert r.status_code == 200 and len(r.json()) == 1
 
 
+def test_blank_title_rejected_on_create(client):
+    login(client, "지휘자", "c1")
+    assert client.post("/practices", json={**BODY, "title": "   "}).status_code == 422
+
+
+def test_blank_title_rejected_on_update(client):
+    login(client, "지휘자", "c1")
+    pid = client.post("/practices", json=BODY).json()["id"]
+    assert client.put(f"/practices/{pid}", json={**BODY, "title": "  "}).status_code == 422
+
+
 def test_update_and_delete_open_only(client, conn):
     login(client, "지휘자", "c1")
     pid = client.post("/practices", json=BODY).json()["id"]
