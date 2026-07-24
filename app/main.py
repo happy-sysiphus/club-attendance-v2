@@ -290,6 +290,21 @@ def register_routes(app: FastAPI) -> None:
             bg.add_task(notion.sync_close, request.app.state.db_path, pid)
         return {"status": "closed"}
 
+    @app.get("/me/stats")
+    def my_stats(conn=Depends(get_conn), me=Depends(current_member)):
+        counts = {"present": 0, "late": 0, "absent": 0}
+        rows = conn.execute(
+            """SELECT a.status, COUNT(*) AS n FROM attendance a
+               JOIN practices p ON p.id = a.practice_id
+               WHERE p.status = 'closed' AND a.member_id = ?
+               GROUP BY a.status""", (me["id"],))
+        for r in rows:
+            counts[r["status"]] = r["n"]
+        total = sum(counts.values())
+        return {"total": total, **counts,
+                "rate": rules.attendance_rate(counts["present"],
+                                              counts["late"], total)}
+
     @app.post("/practices/{pid}/reopen")
     def reopen_practice(pid: int, conn=Depends(get_conn),
                         _=Depends(require_conductor)):
