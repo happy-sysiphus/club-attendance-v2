@@ -1,5 +1,3 @@
-import pytest
-
 from app import auth
 from tests.conftest import login
 
@@ -33,6 +31,5 @@ def test_login_inactive_member_401(client, conn):
     assert r.status_code == 401
 
 
-@pytest.mark.xfail(reason="Task 4에서 /practices 라우트 추가")
 def test_protected_route_without_cookie_401(client):
     assert client.get("/practices").status_code == 401
