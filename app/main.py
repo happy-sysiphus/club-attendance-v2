@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from . import auth, config, db, rules
@@ -262,6 +262,41 @@ def register_routes(app: FastAPI) -> None:
             (pid, body.part, db.now_kst().isoformat()))
         conn.commit()
         return {"practice_id": pid, "part": body.part, "confirmed": True}
+
+    @app.post("/practices/{pid}/close")
+    def close_practice(pid: int, bg: BackgroundTasks, request: Request,
+                       conn=Depends(get_conn), _=Depends(require_conductor)):
+        practice = get_practice(conn, pid)
+        if practice["status"] == "open":
+            confirmed = {r["part"] for r in conn.execute(
+                "SELECT part FROM part_confirmations WHERE practice_id=?",
+                (pid,))}
+            missing = [p for p in db.PARTS if p not in confirmed]
+            if missing:
+                raise HTTPException(409, {"missing_parts": missing})
+            existing = {r["member_id"]: r for r in conn.execute(
+                "SELECT * FROM attendance WHERE practice_id=?", (pid,))}
+            for m in conn.execute("SELECT id FROM members WHERE active=1"):
+                row = existing.get(m["id"])
+                if row is None or row["status"] is None:
+                    db.upsert_attendance(conn, pid, m["id"],
+                                         "absent", None, None, "auto")
+            conn.execute(
+                "UPDATE practices SET status='closed', closed_at=? WHERE id=?",
+                (db.now_kst().isoformat(), pid))
+            conn.commit()
+        notion = request.app.state.notion
+        if notion is not None:
+            bg.add_task(notion.sync_close, request.app.state.db_path, pid)
+        return {"status": "closed"}
+
+    @app.post("/practices/{pid}/reopen")
+    def reopen_practice(pid: int, conn=Depends(get_conn),
+                        _=Depends(require_conductor)):
+        get_practice(conn, pid)
+        conn.execute("UPDATE practices SET status='open' WHERE id=?", (pid,))
+        conn.commit()
+        return {"status": "open"}
 
 
 if __name__ == "__main__":
