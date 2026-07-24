@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+itsdangerous
+# ponytail: 구 databases API(2022-06-28) 고정, 노션 API data_sources 개편 대응 시 2.5+ 마이그레이션
+notion-client<2.5
+pytest
+httpx
