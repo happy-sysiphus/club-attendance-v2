@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
@@ -42,7 +43,19 @@ class LoginIn(BaseModel):
 
 
 def create_app(db_path: str, notion=None) -> FastAPI:
-    app = FastAPI()
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if app.state.notion is not None:
+            conn = app.state.conn
+            app.state.notion.ensure_databases(conn)
+            empty = conn.execute(
+                "SELECT COUNT(*) FROM members").fetchone()[0] == 0
+            if empty:
+                app.state.notion.refresh_roster(conn, app.state)
+                app.state.notion.restore_archive(conn, app.state)
+        yield
+
+    app = FastAPI(lifespan=lifespan)
     app.state.db_path = db_path
     app.state.conn = db.connect(db_path)
     app.state.notion = notion
@@ -315,5 +328,16 @@ def register_routes(app: FastAPI) -> None:
 
 
 if __name__ == "__main__":
+    import os
+
     import uvicorn
-    uvicorn.run(create_app(config.DB_PATH), host="0.0.0.0", port=8000)
+
+    notion = None
+    if config.NOTION_TOKEN and config.NOTION_PARENT_PAGE_ID:
+        from notion_client import Client
+
+        from .notion import NotionStore
+        notion = NotionStore(Client(auth=config.NOTION_TOKEN),
+                             config.NOTION_PARENT_PAGE_ID)
+    uvicorn.run(create_app(config.DB_PATH, notion=notion),
+                host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
