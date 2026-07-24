@@ -108,6 +108,10 @@ class StatusIn(BaseModel):
     eta: str | None = None
 
 
+class PartIn(BaseModel):
+    part: str
+
+
 def effective_row(att, practice) -> dict:
     starts_at = datetime.fromisoformat(practice["starts_at"])
     raw = (att["status"], att["source"]) if att else (None, None)
@@ -218,6 +222,46 @@ def register_routes(app: FastAPI) -> None:
                 "parts": parts, "totals": totals,
                 "roster_warnings": (request.app.state.roster_warnings
                                     if me["role"] == "conductor" else [])}
+
+    @app.put("/practices/{pid}/members/{member_id}")
+    def set_member_status(pid: int, member_id: int, body: StatusIn,
+                          conn=Depends(get_conn), me=Depends(require_staff)):
+        practice = get_practice(conn, pid)
+        if practice["status"] != "open":
+            raise HTTPException(409, "마감된 연습")
+        target = conn.execute(
+            "SELECT * FROM members WHERE id=? AND active=1",
+            (member_id,)).fetchone()
+        if target is None:
+            raise HTTPException(404, "단원 없음")
+        if me["role"] == "part_leader" and target["part"] != me["part"]:
+            raise HTTPException(403, "자기 파트만 수정 가능")
+        try:
+            v = rules.validate_status_input(body.status, body.reason, body.eta)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        db.upsert_attendance(conn, pid, member_id,
+                             v["status"], v["reason"], v["eta"], me["role"])
+        conn.commit()
+        return effective_row(conn.execute(
+            "SELECT * FROM attendance WHERE practice_id=? AND member_id=?",
+            (pid, member_id)).fetchone(), practice)
+
+    @app.post("/practices/{pid}/part/confirm")
+    def confirm_part(pid: int, body: PartIn, conn=Depends(get_conn),
+                     me=Depends(require_staff)):
+        get_practice(conn, pid)
+        if body.part not in db.PARTS:
+            raise HTTPException(422, "part는 soprano/alto/tenor/bass 중 하나")
+        if me["role"] == "part_leader" and body.part != me["part"]:
+            raise HTTPException(403, "자기 파트만 확인 가능")
+        conn.execute(
+            """INSERT INTO part_confirmations (practice_id, part, confirmed_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT (practice_id, part) DO NOTHING""",
+            (pid, body.part, db.now_kst().isoformat()))
+        conn.commit()
+        return {"practice_id": pid, "part": body.part, "confirmed": True}
 
 
 if __name__ == "__main__":

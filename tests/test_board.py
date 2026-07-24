@@ -1,5 +1,3 @@
-import pytest
-
 from tests.conftest import login
 from tests.test_me import make_practice, FUTURE, PAST
 
@@ -53,7 +51,6 @@ def test_inactive_member_excluded(client, conn):
     assert "김알" not in names
 
 
-@pytest.mark.xfail(reason="Task 7에서 confirm 라우트 추가")
 def test_confirmed_flag_flips_after_confirm(client):
     pid = make_practice(client, FUTURE)
     login(client, "파트장테너", "pt")
