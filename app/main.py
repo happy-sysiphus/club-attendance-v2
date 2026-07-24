@@ -104,7 +104,7 @@ class PracticeIn(BaseModel):
 
 def parse_starts_at(value: str) -> str:
     try:
-        return datetime.fromisoformat(value).isoformat()
+        return db.to_kst_naive_iso(value)
     except ValueError:
         raise HTTPException(422, "starts_at는 ISO 형식(YYYY-MM-DDTHH:MM:SS)")
 
@@ -268,7 +268,9 @@ def register_routes(app: FastAPI) -> None:
     @app.post("/practices/{pid}/part/confirm")
     def confirm_part(pid: int, body: PartIn, conn=Depends(get_conn),
                      me=Depends(require_staff)):
-        get_practice(conn, pid)
+        practice = get_practice(conn, pid)
+        if practice["status"] != "open":
+            raise HTTPException(409, "마감된 연습")
         if body.part not in db.PARTS:
             raise HTTPException(422, "part는 soprano/alto/tenor/bass 중 하나")
         if me["role"] == "part_leader" and body.part != me["part"]:
@@ -344,5 +346,11 @@ if __name__ == "__main__":
         from .notion import NotionStore
         notion = NotionStore(Client(auth=config.NOTION_TOKEN),
                              config.NOTION_PARENT_PAGE_ID)
+    if notion is None:
+        logging.getLogger("attendance").warning(
+            "NOTION 미설정 — 순수 SQLite 임시 저장으로 기동. 재배포 시 전체 데이터 유실됨.")
+    if config.SECRET_KEY == "dev-secret":
+        logging.getLogger("attendance").warning(
+            "SECRET_KEY가 기본값(dev-secret) — 프로덕션에서 반드시 설정하세요.")
     uvicorn.run(create_app(config.DB_PATH, notion=notion),
                 host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

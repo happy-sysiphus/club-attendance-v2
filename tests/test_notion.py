@@ -179,6 +179,23 @@ def test_restore_archive_rebuilds(tmp_path):
     assert a["notion_page_id"] is not None
 
 
+def test_restore_archive_normalizes_offset_date(tmp_path):
+    conn, fake, store, state = make_env(tmp_path)
+    conn.execute("INSERT INTO members (id, name, student_id, part, role) "
+                 "VALUES (1, '김소', 'm1', 'soprano', 'member')")
+    conn.commit()
+    att_db = setting(conn, "attendance_db_id")
+    fake.pages.create(
+        parent={"database_id": att_db},
+        properties={"이름": title("김소"), "학번": rich("m1"),
+                    "파트": select("소프라노"), "연습명": rich("정기연습"),
+                    "날짜": date("2026-07-24T19:00:00+09:00"),
+                    "상태": select("지각"), "사유": rich("버스")})
+    store.restore_archive(conn, state)
+    p = conn.execute("SELECT * FROM practices").fetchone()
+    assert p["starts_at"] == "2026-07-24T19:00:00"
+
+
 def test_restore_archive_bad_rows_warn_and_skip(tmp_path):
     conn, fake, store, state = make_env(tmp_path)
     conn.execute("INSERT INTO members (id, name, student_id, part, role) "

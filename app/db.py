@@ -54,10 +54,19 @@ def now_kst() -> datetime:
     return datetime.now(KST).replace(tzinfo=None, microsecond=0)
 
 
+def to_kst_naive_iso(value: str) -> str:
+    """ISO datetime string → KST-naive ISO string. Raises ValueError on bad input."""
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(KST).replace(tzinfo=None)
+    return dt.replace(microsecond=0).isoformat()
+
+
 def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA)
     return conn
 

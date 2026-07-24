@@ -40,6 +40,20 @@ def test_blank_title_rejected_on_update(client):
     assert client.put(f"/practices/{pid}", json={**BODY, "title": "  "}).status_code == 422
 
 
+def test_offset_starts_at_normalized_and_board_works(client):
+    login(client, "지휘자", "c1")
+    r = client.post("/practices", json={"title": "p",
+                                        "starts_at": "2099-09-01T19:00:00+09:00"})
+    assert r.status_code == 201
+    starts_at = r.json()["starts_at"]
+    assert "+" not in starts_at and "Z" not in starts_at
+    assert starts_at == "2099-09-01T19:00:00"
+    pid = r.json()["id"]
+    board = client.get(f"/practices/{pid}/board")
+    assert board.status_code == 200
+    assert board.json()["practice"]["starts_at"] == "2099-09-01T19:00:00"
+
+
 def test_update_and_delete_open_only(client, conn):
     login(client, "지휘자", "c1")
     pid = client.post("/practices", json=BODY).json()["id"]

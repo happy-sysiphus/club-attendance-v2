@@ -171,6 +171,11 @@ class NotionStore:
             if not sid or not title_ or not start or status is None:
                 warnings.append(f"기록 행 무시: 학번={sid!r} 연습명={title_!r}")
                 continue
+            try:
+                start = db.to_kst_naive_iso(start)
+            except ValueError:
+                warnings.append(f"기록 행 무시: 잘못된 날짜 형식 {start!r}")
+                continue
             member_id = members.get(sid)
             if member_id is None:
                 warnings.append(f"기록 행 무시: 명단에 없는 학번 {sid!r}")

@@ -75,3 +75,12 @@ def test_confirm_bad_part_422(client):
     login(client, "지휘자", "c1")
     assert client.post(f"/practices/{pid}/part/confirm",
                        json={"part": "baritone"}).status_code == 422
+
+
+def test_confirm_closed_practice_409(client, conn):
+    pid = make_practice(client, FUTURE)
+    conn.execute("UPDATE practices SET status='closed' WHERE id=?", (pid,))
+    conn.commit()
+    login(client, "지휘자", "c1")
+    r = client.post(f"/practices/{pid}/part/confirm", json={"part": "soprano"})
+    assert r.status_code == 409
