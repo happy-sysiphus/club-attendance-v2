@@ -103,3 +103,20 @@ def test_new_member_in_notion_can_login_via_refresh(tmp_path):
         add_roster_member(fake, roster_db, "신입", "n1", "bass", "member")
         body = login(client, "신입", "n1")   # 캐시에 없음 → refresh 후 매칭
         assert body["part"] == "bass"
+
+
+def test_boot_survives_notion_failure(tmp_path):
+    """노션이 부팅 시 죽어도 앱은 떠야 한다 — /health가 cron-job.org 생명줄."""
+    class BoomNotion:
+        def ensure_databases(self, conn):
+            raise RuntimeError("notion down")
+
+        def refresh_roster(self, conn, state):
+            raise RuntimeError("notion down")
+
+        def restore_archive(self, conn, state):
+            raise RuntimeError("notion down")
+
+    app = create_app(str(tmp_path / "app.db"), notion=BoomNotion())
+    with TestClient(app) as client:   # lifespan이 여기서 실행 — 예외 없어야 함
+        assert client.get("/health").json() == {"ok": True}

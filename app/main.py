@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -46,13 +47,17 @@ def create_app(db_path: str, notion=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if app.state.notion is not None:
-            conn = app.state.conn
-            app.state.notion.ensure_databases(conn)
-            empty = conn.execute(
-                "SELECT COUNT(*) FROM members").fetchone()[0] == 0
-            if empty:
-                app.state.notion.refresh_roster(conn, app.state)
-                app.state.notion.restore_archive(conn, app.state)
+            try:
+                conn = app.state.conn
+                app.state.notion.ensure_databases(conn)
+                empty = conn.execute(
+                    "SELECT COUNT(*) FROM members").fetchone()[0] == 0
+                if empty:
+                    app.state.notion.refresh_roster(conn, app.state)
+                    app.state.notion.restore_archive(conn, app.state)
+            except Exception:
+                logging.getLogger("attendance").exception(
+                    "노션 부팅 복원 실패 — 빈 캐시로 기동, 로그인 시 재시도")
         yield
 
     app = FastAPI(lifespan=lifespan)
