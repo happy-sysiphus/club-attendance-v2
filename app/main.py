@@ -102,6 +102,21 @@ def practice_dict(row: sqlite3.Row) -> dict:
     return dict(row)
 
 
+class StatusIn(BaseModel):
+    status: str
+    reason: str | None = None
+    eta: str | None = None
+
+
+def effective_row(att, practice) -> dict:
+    starts_at = datetime.fromisoformat(practice["starts_at"])
+    raw = (att["status"], att["source"]) if att else (None, None)
+    status, source = rules.effective_status(raw[0], raw[1], starts_at, db.now_kst())
+    return {"status": status, "source": source,
+            "reason": att["reason"] if att else None,
+            "eta": att["eta"] if att else None}
+
+
 def register_routes(app: FastAPI) -> None:
     """Task 4~9에서 라우트를 이 함수 안에 추가한다."""
 
@@ -143,6 +158,33 @@ def register_routes(app: FastAPI) -> None:
         conn.execute("DELETE FROM practices WHERE id=?", (pid,))
         conn.commit()
         return {"deleted": pid}
+
+    @app.get("/practices/{pid}/me")
+    def my_status(pid: int, conn=Depends(get_conn), me=Depends(current_member)):
+        practice = get_practice(conn, pid)
+        att = conn.execute(
+            "SELECT * FROM attendance WHERE practice_id=? AND member_id=?",
+            (pid, me["id"])).fetchone()
+        return effective_row(att, practice)
+
+    @app.put("/practices/{pid}/me")
+    def set_my_status(pid: int, body: StatusIn, conn=Depends(get_conn),
+                      me=Depends(current_member)):
+        practice = get_practice(conn, pid)
+        if practice["status"] != "open":
+            raise HTTPException(409, "마감된 연습")
+        if db.now_kst() >= datetime.fromisoformat(practice["starts_at"]):
+            raise HTTPException(403, "연습 시작 후에는 파트장·지휘자만 수정 가능")
+        try:
+            v = rules.validate_status_input(body.status, body.reason, body.eta)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        db.upsert_attendance(conn, pid, me["id"],
+                             v["status"], v["reason"], v["eta"], "member")
+        conn.commit()
+        return effective_row(conn.execute(
+            "SELECT * FROM attendance WHERE practice_id=? AND member_id=?",
+            (pid, me["id"])).fetchone(), practice)
 
 
 if __name__ == "__main__":
