@@ -18,12 +18,17 @@ export class ApiError extends Error {
 }
 
 export async function api(method, path, body) {
-  const res = await fetch(path, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-    credentials: 'same-origin',
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+    });
+  } catch {
+    throw new ApiError(0, '서버에 연결하지 못했어요');
+  }
   if (res.status === 401) {
     clearSession();
     location.hash = '#/login';
