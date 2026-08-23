@@ -14,6 +14,16 @@ SQLite는 휘발 작업장. 설계: docs/superpowers/specs/2026-07-24-attendance
 노션 준비: 빈 페이지 하나 만들고 integration을 연결하면 앱이 첫 실행 때
 명단·출석 기록 DB를 자동 생성한다. 명단 관리는 노션에서 직접.
 
+## 화면
+
+`python -m app.main` 후 `http://localhost:8000/` 접속. 프런트는 `app/static/`의
+순수 HTML+JS(빌드 없음)이며 같은 서버가 서빙한다. 설계:
+docs/superpowers/specs/2026-08-23-frontend-design.md
+
+로컬 확인용 명단 시드(노션 없이):
+
+    python -c "from tests.conftest import SEED; from app import db; c=db.connect('attendance.db'); c.executemany('INSERT OR IGNORE INTO members (name, student_id, part, role) VALUES (?,?,?,?)', SEED); c.commit()"
+
 ## 배포 (Render 무료)
 
 - Build: `pip install -r requirements.txt`
