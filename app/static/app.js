@@ -146,10 +146,81 @@ async function homeView() {
   };
 }
 
+// ---------- 상태 폼 (단원 본인 입력 · 현황판 수정 시트 공용) ----------
+function statusForm(initial, locked) {
+  const form = document.createElement('form');
+  form.className = 'status-form stack';
+  const dis = locked ? 'disabled' : '';
+  form.innerHTML = `
+    <div class="segment" role="radiogroup" aria-label="출석 상태">
+      ${['present', 'late', 'absent'].map(v => `
+        <label><input type="radio" name="status" value="${v}" ${initial.status === v ? 'checked' : ''} ${dis}><span>${STATUS[v]}</span></label>`).join('')}
+    </div>
+    <label class="f-reason">사유 <input name="reason" value="${esc(initial.reason)}" placeholder="예: 수업, 버스 지연" ${dis}></label>
+    <label class="f-eta">도착 예정 <input name="eta" type="time" value="${esc(initial.eta)}" ${dis}></label>
+    ${locked ? '' : '<button class="btn primary">저장</button>'}`;
+  const f = form.elements;
+  const sync = () => {
+    const st = f.status.value;
+    form.dataset.status = st;
+    const btn = form.querySelector('button');
+    if (btn) btn.disabled = !st || (st === 'late' && !(f.reason.value.trim() && f.eta.value));
+  };
+  form.oninput = sync;
+  sync();
+  form.read = () => {
+    const st = f.status.value;
+    return {
+      status: st,
+      reason: st === 'present' ? null : (f.reason.value.trim() || null),
+      eta: st === 'late' ? f.eta.value : null,
+    };
+  };
+  return form;
+}
+
+// ---------- 내 출석 입력 ----------
+function describe(me) {
+  if (me.status == null) return '미입력';
+  let s = STATUS[me.status] + (me.source === 'auto' ? '(자동)' : '');
+  if (me.status === 'late') s += ` · ${esc(me.reason)} · 도착 ${esc(me.eta)}`;
+  else if (me.reason) s += ` · ${esc(me.reason)}`;
+  return s;
+}
+
+async function practiceView(id) {
+  const [list, me] = await Promise.all([api('GET', '/practices'), api('GET', `/practices/${id}/me`)]);
+  const p = list.find(x => x.id === id);
+  if (!p) throw new ApiError(404, '연습 없음');
+  const started = new Date() >= new Date(p.starts_at);
+  const closed = p.status === 'closed';
+  view.innerHTML = `
+    <section class="card">
+      <p class="eyebrow">${closed ? '마감' : '진행중'}</p>
+      <h1 class="display">${esc(p.title)}</h1>
+      <p>${when(p)}</p>
+    </section>
+    <section class="card stack">
+      <p class="eyebrow">내 상태</p>
+      <p class="current ${me.status ?? ''}">${describe(me)}</p>
+      ${closed ? '<p class="muted">마감된 연습입니다.</p>'
+        : started ? '<p class="muted">연습이 시작돼 파트장·지휘자만 수정할 수 있어요.</p>' : ''}
+      <div id="form"></div>
+    </section>`;
+  const form = statusForm(me, closed || started);
+  view.querySelector('#form').replaceWith(form);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    try { await api('PUT', `/practices/${id}/me`, form.read()); toast('저장했어요'); route(); }
+    catch (err) { toast(err.message, true); if (err.status === 403 || err.status === 409) route(); }
+  };
+}
+
 // ---------- 라우터 ----------
 const routes = [
   [/^#\/login$/, loginView],
   [/^#\/home$/, homeView],
+  [/^#\/practice\/(\d+)$/, practiceView],
 ];
 
 async function route() {
