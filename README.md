@@ -1,4 +1,4 @@
-# 합창단 출석 관리 백엔드
+# 합창단 출석 관리
 
 50명 이하 합창단의 연습 출석을 관리하는 FastAPI 앱. 노션이 영구 원본,
 SQLite는 휘발 작업장. 설계: docs/superpowers/specs/2026-07-24-attendance-backend-design.md

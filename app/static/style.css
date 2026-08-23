@@ -2,6 +2,7 @@
   --navy: #1F2A44; --gold: #C9A227; --ivory: #F7F4EC; --card: #fff;
   --ink: #1C1C1C; --muted: #6B7280; --line: #d6d3cc;
   --present: #2E7D4F; --late: #B7791F; --absent: #B3261E; --none: #6B7280;
+  --gold-text: #8A6D12; --late-text: #7A5210;
   --font: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --display: "Noto Serif KR", "Apple SD Gothic Neo", serif;
 }
@@ -18,7 +19,7 @@ main { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 16px
 .stack { display: grid; gap: 12px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .between { justify-content: space-between; }
-.eyebrow { margin: 0; font-size: 12px; letter-spacing: .08em; color: var(--gold); font-weight: 600; }
+.eyebrow { margin: 0; font-size: 12px; letter-spacing: .08em; color: var(--gold-text); font-weight: 600; }
 .display { font-family: var(--display); font-weight: 600; margin: 4px 0; }
 h1.display { font-size: 26px; }
 h2 { font-size: 18px; margin: 0; }
@@ -47,7 +48,7 @@ input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid 
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .chip { font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: 999px; color: #fff; background: var(--none); white-space: nowrap; }
 .chip.present { background: var(--present); }
-.chip.late { background: var(--late); }
+.chip.late { background: var(--late); color: #2A1C05; }
 .chip.absent { background: var(--absent); }
 .warn { background: #FFF4D6; border: 1px solid var(--late); border-radius: 12px; padding: 12px; font-size: 14px; }
 
@@ -71,7 +72,7 @@ dialog::backdrop { background: rgba(31, 42, 68, .5); }
 .status-form[data-status="absent"] .f-reason { display: flex; }
 .current { font-weight: 600; margin: 0; }
 .current.present { color: var(--present); }
-.current.late { color: var(--late); }
+.current.late { color: var(--late-text); }
 .current.absent { color: var(--absent); }
 
 .part { border-left: 3px solid var(--gold); padding-left: 12px; display: grid; gap: 8px; }
