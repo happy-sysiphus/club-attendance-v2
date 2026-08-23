@@ -2,8 +2,10 @@ import logging
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import auth, config, db, rules
@@ -93,6 +95,8 @@ def create_app(db_path: str, notion=None) -> FastAPI:
                 "part": row["part"], "role": row["role"]}
 
     register_routes(app)
+    app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True),
+              name="static")
     return app
 
 
