@@ -254,9 +254,10 @@ async function boardView(id) {
   let data;
   let busy = false;
   let lastList = '';
+  let alive = true;
 
   async function load() {
-    if (busy) return;
+    if (busy || !alive) return;
     if (!view.querySelector('#board-list')) return; // 뷰가 이미 교체됨
     busy = true;
     try { data = await api('GET', `/practices/${id}/board`); }
@@ -266,7 +267,7 @@ async function boardView(id) {
       return; // 이미 데이터가 있으면 조용히 다음 주기에 재시도
     }
     finally { busy = false; }
-    if (view.querySelector('#board-list')) render();
+    if (alive && view.querySelector('#board-list')) render();
   }
 
   async function act(promise, okMsg) {
@@ -372,7 +373,7 @@ async function boardView(id) {
 
   const timer = setInterval(load, 5000);
   load();
-  return () => clearInterval(timer);
+  return () => { alive = false; clearInterval(timer); };
 }
 
 // ---------- 라우터 ----------
