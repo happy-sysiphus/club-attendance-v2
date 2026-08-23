@@ -216,11 +216,138 @@ async function practiceView(id) {
   };
 }
 
+// ---------- 현황판 ----------
+const ORDER = { null: 0, late: 1, absent: 2, present: 3 }; // 확인 필요 우선
+function sortMembers(members) {
+  return [...members].sort((a, b) => ORDER[a.status] - ORDER[b.status]); // 안정 정렬 → 그룹 안은 이름순 유지
+}
+
+async function boardView(id) {
+  const s = session();
+  if (s.role === 'member') { toast('파트장·지휘자만 볼 수 있어요', true); location.hash = '#/home'; return; }
+  const conductor = s.role === 'conductor';
+  view.innerHTML = `
+    <div id="board-head"></div>
+    <div id="board-list" class="stack"></div>
+    <dialog id="edit">
+      <div class="stack">
+        <h2 id="edit-name"></h2>
+        <div id="edit-form"></div>
+        <button type="button" id="edit-cancel" class="btn">취소</button>
+      </div>
+    </dialog>`;
+  const dlg = view.querySelector('#edit');
+  view.querySelector('#edit-cancel').onclick = () => dlg.close();
+  let data;
+
+  async function load() {
+    try { data = await api('GET', `/practices/${id}/board`); }
+    catch (e) {
+      if (e.status === 403 || e.status === 404) { toast(e.status === 404 ? '연습이 없어요' : e.message, true); location.hash = '#/home'; }
+      return; // 네트워크 오류 등은 조용히 다음 주기에 재시도
+    }
+    render();
+  }
+
+  async function act(promise, okMsg) {
+    try { await promise; if (okMsg) toast(okMsg); }
+    catch (e) {
+      const mp = e.detail && e.detail.missing_parts;
+      toast(mp ? `${mp.map(k => PART[k]).join('·')} 확인이 필요해요` : e.message, true);
+    }
+    load();
+  }
+
+  function render() {
+    const p = data.practice, open = p.status === 'open';
+    const parts = PARTS.filter(k => data.parts[k]);
+    const missing = parts.filter(k => !data.parts[k].confirmed);
+    const allConfirmed = conductor && missing.length === 0;
+    const now = new Date().toTimeString().slice(0, 8);
+    view.querySelector('#board-head').innerHTML = `
+      ${data.roster_warnings.length ? `<div class="warn">명단 확인 필요<br>${data.roster_warnings.map(esc).join('<br>')}</div>` : ''}
+      <section class="card">
+        <p class="eyebrow">${open ? '진행중' : '마감'} · 갱신 ${now}</p>
+        <h1 class="display">${esc(p.title)}</h1>
+        <p>${when(p)}</p>
+        <div class="chips">
+          <span class="chip present">출석 ${data.totals.present}</span>
+          <span class="chip late">지각 ${data.totals.late}</span>
+          <span class="chip absent">결석 ${data.totals.absent}</span>
+          <span class="chip none">미확정 ${data.totals.unconfirmed}</span>
+        </div>
+        ${!conductor ? '' : open ? `
+          <div class="row" style="margin-top:12px">
+            <button type="button" id="close" class="btn primary" ${allConfirmed ? '' : 'disabled'}>마감</button>
+            ${allConfirmed ? '' : `<p class="muted">${missing.map(k => PART[k]).join('·')} 확인 대기</p>`}
+          </div>` : `
+          <p class="muted" style="margin-top:12px">${p.notion_synced_at ? `노션 동기화 완료 ${p.notion_synced_at.slice(11, 16)}` : '노션 동기화 중…'}</p>
+          <div class="row">
+            ${p.notion_synced_at ? '' : '<button type="button" id="resync" class="btn">동기화 재시도</button>'}
+            <button type="button" id="reopen" class="btn">재오픈</button>
+          </div>`}
+      </section>`;
+    view.querySelector('#board-list').innerHTML = parts.map(k => {
+      const part = data.parts[k], c = part.counts;
+      return `
+      <section class="part">
+        <header class="row between">
+          <h2>${PART[k]}<small class="muted">출석 ${c.present} · 지각 ${c.late} · 결석 ${c.absent} · 미확정 ${c.unconfirmed}</small></h2>
+          ${part.confirmed ? '<span class="badge done">확인 완료</span>'
+            : open ? `<button type="button" class="btn small" data-confirm="${k}">확인 완료</button>` : ''}
+        </header>
+        <ul class="list">${sortMembers(part.members).map(m => `
+          <li class="m ${m.status ?? 'none'}">
+            <button type="button" data-member="${m.member_id}" ${open ? '' : 'disabled'}>
+              <strong>${esc(m.name)}</strong>
+              <span class="chip ${m.status ?? 'none'}">${STATUS[m.status]}${m.source === 'auto' ? ' · 자동' : ''}</span>
+              ${m.status === 'late' ? `<span class="muted">${esc(m.reason)} · 도착 ${esc(m.eta)}</span>`
+                : m.reason ? `<span class="muted">${esc(m.reason)}</span>` : ''}
+            </button>
+          </li>`).join('')}</ul>
+      </section>`;
+    }).join('');
+    bind();
+  }
+
+  function bind() {
+    const q = sel => view.querySelector(sel);
+    if (q('#close')) q('#close').onclick = () => {
+      if (confirm('마감하면 미확정 단원은 결석 처리됩니다. 마감할까요?')) act(api('POST', `/practices/${id}/close`), '마감했어요');
+    };
+    if (q('#resync')) q('#resync').onclick = () => act(api('POST', `/practices/${id}/close`), '동기화를 다시 요청했어요');
+    if (q('#reopen')) q('#reopen').onclick = () => {
+      if (confirm('연습을 다시 열까요?')) act(api('POST', `/practices/${id}/reopen`), '다시 열었어요');
+    };
+    view.querySelectorAll('[data-confirm]').forEach(b => {
+      b.onclick = () => {
+        if (confirm(`${PART[b.dataset.confirm]} 확인 완료로 표시할까요?`)) act(api('POST', `/practices/${id}/part/confirm`, { part: b.dataset.confirm }), '확인 완료');
+      };
+    });
+    view.querySelectorAll('[data-member]').forEach(b => {
+      b.onclick = () => {
+        const mid = Number(b.dataset.member);
+        const m = Object.values(data.parts).flatMap(x => x.members).find(x => x.member_id === mid);
+        q('#edit-name').textContent = m.name;
+        const form = statusForm(m, false);
+        q('#edit-form').replaceChildren(form);
+        form.onsubmit = e => { e.preventDefault(); dlg.close(); act(api('PUT', `/practices/${id}/members/${mid}`, form.read()), '저장했어요'); };
+        dlg.showModal();
+      };
+    });
+  }
+
+  const timer = setInterval(load, 5000);
+  await load();
+  return () => clearInterval(timer);
+}
+
 // ---------- 라우터 ----------
 const routes = [
   [/^#\/login$/, loginView],
   [/^#\/home$/, homeView],
   [/^#\/practice\/(\d+)$/, practiceView],
+  [/^#\/board\/(\d+)$/, boardView],
 ];
 
 async function route() {
