@@ -12,6 +12,15 @@ export function toast(msg, error = false) {
   toastTimer = setTimeout(() => { el.className = ''; }, 3000);
 }
 
+function failed() {
+  view.innerHTML = `
+    <section class="card stack">
+      <p>불러오지 못했어요. 연결을 확인해 주세요.</p>
+      <button type="button" id="retry" class="btn primary">다시 시도</button>
+    </section>`;
+  view.querySelector('#retry').onclick = () => route();
+}
+
 function renderHeader() {
   const s = session();
   document.getElementById('user').textContent = s ? `${s.name} · ${PART[s.part]} · ${ROLE[s.role]}` : '';
@@ -60,7 +69,9 @@ function when(p) { return `${fmtDate(p.starts_at)}${p.place ? ' · ' + esc(p.pla
 
 async function homeView() {
   const s = session();
-  const [list, stats] = await Promise.all([api('GET', '/practices'), api('GET', '/me/stats')]);
+  const list = await api('GET', '/practices');
+  const stats = await api('GET', '/me/stats');
+  if (!location.hash.startsWith('#/home') && location.hash !== '') return;
   const next = nextPractice(list);
   const staff = s.role !== 'member';
   const conductor = s.role === 'conductor';
@@ -99,7 +110,7 @@ async function homeView() {
             <button type="button" class="icon" data-del="${p.id}" aria-label="삭제">✕</button>` : ''}
         </li>`).join('')}</ul>` : '<p class="muted">연습이 없어요</p>'}
     </section>
-    <dialog id="pform">
+    <dialog id="pform" aria-labelledby="pform-title">
       <form class="stack">
         <h2 id="pform-title">새 연습</h2>
         <label>제목 <input name="title" required></label>
@@ -189,7 +200,9 @@ function describe(me) {
 }
 
 async function practiceView(id) {
-  const [list, me] = await Promise.all([api('GET', '/practices'), api('GET', `/practices/${id}/me`)]);
+  const list = await api('GET', '/practices');
+  const me = await api('GET', `/practices/${id}/me`);
+  if (location.hash !== `#/practice/${id}`) return;
   const p = list.find(x => x.id === id);
   if (!p) throw new ApiError(404, '연습 없음');
   const started = new Date() >= new Date(p.starts_at);
@@ -229,7 +242,7 @@ async function boardView(id) {
   view.innerHTML = `
     <div id="board-head"></div>
     <div id="board-list" class="stack"></div>
-    <dialog id="edit">
+    <dialog id="edit" aria-labelledby="edit-name">
       <div class="stack">
         <h2 id="edit-name"></h2>
         <div id="edit-form"></div>
@@ -239,23 +252,32 @@ async function boardView(id) {
   const dlg = view.querySelector('#edit');
   view.querySelector('#edit-cancel').onclick = () => dlg.close();
   let data;
+  let busy = false;
+  let lastList = '';
 
   async function load() {
+    if (busy) return;
+    if (!view.querySelector('#board-list')) return; // 뷰가 이미 교체됨
+    busy = true;
     try { data = await api('GET', `/practices/${id}/board`); }
     catch (e) {
       if (e.status === 403 || e.status === 404) { toast(e.status === 404 ? '연습이 없어요' : e.message, true); location.hash = '#/home'; }
-      return; // 네트워크 오류 등은 조용히 다음 주기에 재시도
+      else if (!data) { const h = view.querySelector('#board-head'); if (h) h.innerHTML = '<p class="muted">불러오지 못했어요. 다시 시도하는 중…</p>'; }
+      return; // 이미 데이터가 있으면 조용히 다음 주기에 재시도
     }
-    render();
+    finally { busy = false; }
+    if (view.querySelector('#board-list')) render();
   }
 
   async function act(promise, okMsg) {
-    try { await promise; if (okMsg) toast(okMsg); }
+    let ok = false;
+    try { await promise; ok = true; if (okMsg) toast(okMsg); }
     catch (e) {
       const mp = e.detail && e.detail.missing_parts;
       toast(mp ? `${mp.map(k => PART[k]).join('·')} 확인이 필요해요` : e.message, true);
     }
     load();
+    return ok;
   }
 
   function render() {
@@ -287,7 +309,7 @@ async function boardView(id) {
             <button type="button" id="reopen" class="btn">재오픈</button>
           </div>`}
       </section>`;
-    view.querySelector('#board-list').innerHTML = parts.map(k => {
+    const html = parts.map(k => {
       const part = data.parts[k], c = part.counts;
       return `
       <section class="part">
@@ -307,6 +329,10 @@ async function boardView(id) {
           </li>`).join('')}</ul>
       </section>`;
     }).join('');
+    if (html !== lastList) {
+      lastList = html;
+      view.querySelector('#board-list').innerHTML = html;
+    }
     bind();
   }
 
@@ -331,14 +357,21 @@ async function boardView(id) {
         q('#edit-name').textContent = m.name;
         const form = statusForm(m, false);
         q('#edit-form').replaceChildren(form);
-        form.onsubmit = e => { e.preventDefault(); dlg.close(); act(api('PUT', `/practices/${id}/members/${mid}`, form.read()), '저장했어요'); };
+        form.onsubmit = async e => {
+          e.preventDefault();
+          const btn = form.querySelector('button');
+          if (btn) btn.disabled = true;
+          const ok = await act(api('PUT', `/practices/${id}/members/${mid}`, form.read()), '저장했어요');
+          if (ok) dlg.close();
+          else if (btn) btn.disabled = false;
+        };
         dlg.showModal();
       };
     });
   }
 
   const timer = setInterval(load, 5000);
-  await load();
+  load();
   return () => clearInterval(timer);
 }
 
@@ -350,7 +383,10 @@ const routes = [
   [/^#\/board\/(\d+)$/, boardView],
 ];
 
+let generation = 0;
+
 async function route() {
+  const gen = ++generation;
   if (cleanup) { cleanup(); cleanup = null; }
   const hash = location.hash || '#/home';
   const match = routes.find(([re]) => re.test(hash));
@@ -360,10 +396,13 @@ async function route() {
   renderHeader();
   view.innerHTML = '<p class="muted">불러오는 중…</p>';
   try {
-    cleanup = (await fn(...hash.match(re).slice(1).map(Number))) || null;
+    const done = (await fn(...hash.match(re).slice(1).map(Number))) || null;
+    if (gen !== generation) { if (done) done(); return; } // 그 사이 다른 화면으로 이동
+    cleanup = done;
   } catch (e) {
+    if (gen !== generation) return;
     if (e.status === 404) { toast('연습이 없어요', true); location.hash = '#/home'; }
-    else if (e.status !== 401) toast(e.message, true);
+    else if (e.status !== 401) { toast(e.message, true); failed(); }
   }
 }
 window.addEventListener('hashchange', route);
