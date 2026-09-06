@@ -1,10 +1,16 @@
-export const PARTS = ['soprano', 'alto', 'tenor', 'bass'];
-export const PART = { soprano: '소프라노', alto: '알토', tenor: '테너', bass: '베이스' };
+export const PARTS = ['soprano', 'alto', 'tenor', 'bass', 'accompanist'];
+export const PART = { soprano: '소프라노', alto: '알토', tenor: '테너', bass: '베이스', accompanist: '반주자', conductor: '지휘자' };
 export const ROLE = { member: '단원', part_leader: '파트장', conductor: '지휘자' };
 export const STATUS = { present: '출석', late: '지각', absent: '결석', null: '미확정' };
 
 export function session() {
-  try { return JSON.parse(localStorage.getItem('session')); } catch { return null; }
+  try {
+    const s = JSON.parse(localStorage.getItem('session'));
+    // 기존 브라우저에 남은 지휘자 성부 표시도 새 분류에 맞춘다.
+    if (s?.role === 'conductor') s.part = 'conductor';
+    if (s?.part === 'accompanist') s.role = 'member';
+    return s;
+  } catch { return null; }
 }
 export function setSession(s) { localStorage.setItem('session', JSON.stringify(s)); }
 export function clearSession() { localStorage.removeItem('session'); }
@@ -44,8 +50,16 @@ export function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ESC[c])
 
 const DAYS = '일월화수목금토';
 export function fmtDate(iso) {
-  const d = new Date(iso);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${d.getMonth() + 1}/${d.getDate()} (${DAYS[d.getDay()]}) ${hh}:${mm}`;
+  // API의 날짜는 KST-naive. 기기의 시간대와 무관하게 같은 날짜를 표시한다.
+  const [year, month, day] = iso.slice(0, 10).split('-').map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return `${month}/${day} (${DAYS[weekday]}) ${iso.slice(11, 16)}`;
+}
+
+export function todayKst() {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+export function practiceLink(p, role) {
+  return role === 'member' ? `#/practice/${p.id}` : `#/board/${p.id}`;
 }

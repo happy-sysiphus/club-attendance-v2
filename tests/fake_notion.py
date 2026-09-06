@@ -1,4 +1,5 @@
 import itertools
+from copy import deepcopy
 
 
 class _DBs:
@@ -7,8 +8,8 @@ class _DBs:
 
     def create(self, parent, title, properties):
         db_id = f"db{next(self.fake.seq)}"
-        props = {name: {"id": f"prop{next(self.fake.seq)}"}
-                 for name in properties}
+        props = {name: {**deepcopy(prop), "id": f"prop{next(self.fake.seq)}"}
+                 for name, prop in properties.items()}
         self.fake.dbs[db_id] = {
             "id": db_id, "parent": parent["page_id"],
             "title": title[0]["text"]["content"],
@@ -22,6 +23,14 @@ class _DBs:
     def query(self, database_id, start_cursor=None, page_size=100):
         pages = list(self.fake.dbs[database_id]["pages"].values())
         return {"results": pages, "has_more": False, "next_cursor": None}
+
+    def update(self, database_id, properties):
+        props = self.fake.dbs[database_id]["properties"]
+        for key, value in properties.items():
+            name = next((name for name, prop in props.items()
+                         if prop["id"] == key), key)
+            props[name].update(deepcopy(value))
+        return self.retrieve(database_id)
 
 
 class _Pages:

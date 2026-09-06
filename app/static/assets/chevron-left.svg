@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="arrow_back_ios_new">
+<mask id="mask0_0_94" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+<rect id="Bounding box" width="24" height="24" fill="#D9D9D9" style="fill:#D9D9D9;fill:color(display-p3 0.8510 0.8510 0.8510);fill-opacity:1;"/>
+</mask>
+<g mask="url(#mask0_0_94)">
+<path id="arrow_back_ios_new_2" d="M9.55 12L15.9 18.35C16.15 18.6 16.2708 18.8917 16.2625 19.225C16.2542 19.5583 16.125 19.85 15.875 20.1C15.625 20.35 15.3333 20.475 15 20.475C14.6667 20.475 14.375 20.35 14.125 20.1L7.425 13.425C7.225 13.225 7.075 13 6.975 12.75C6.875 12.5 6.825 12.25 6.825 12C6.825 11.75 6.875 11.5 6.975 11.25C7.075 11 7.225 10.775 7.425 10.575L14.125 3.875C14.375 3.625 14.6708 3.50417 15.0125 3.5125C15.3542 3.52083 15.65 3.65 15.9 3.9C16.15 4.15 16.275 4.44167 16.275 4.775C16.275 5.10833 16.15 5.4 15.9 5.65L9.55 12Z" fill="#1C1B1F" style="fill:#1C1B1F;fill:color(display-p3 0.1098 0.1059 0.1216);fill-opacity:1;"/>
+</g>
+</g>
+</svg>

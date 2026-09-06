@@ -26,15 +26,15 @@ def test_conductor_sees_all_parts_and_totals(client):
     body = client.get(f"/practices/{pid}/board").json()
     assert set(body["parts"]) == {"soprano", "alto", "tenor", "bass"}
     assert body["totals"]["late"] == 1
-    # 시드 7명: late 1 + 미확정 6 (시작 전이라 unconfirmed)
-    assert body["totals"]["unconfirmed"] == 6
+    # 지휘자를 제외한 출석 대상 6명: late 1 + 미확정 5
+    assert body["totals"]["unconfirmed"] == 5
 
 
 def test_auto_absent_counted_after_start(client):
     pid = make_practice(client, PAST)
     login(client, "지휘자", "c1")
     body = client.get(f"/practices/{pid}/board").json()
-    assert body["totals"]["absent"] == 7
+    assert body["totals"]["absent"] == 6
     assert body["totals"]["unconfirmed"] == 0
     soprano = body["parts"]["soprano"]["members"]
     assert all(m["status"] == "absent" and m["source"] == "auto"

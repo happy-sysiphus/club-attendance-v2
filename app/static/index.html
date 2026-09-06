@@ -2,20 +2,34 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>글리 출석</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="description" content="아주대학교 합창단 글리의 출석과 연습 일정">
+<title>Glee · 출석과 일정</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<a class="skip-link" href="#view">본문으로 이동</a>
+<div class="app-shell">
 <header class="top">
-  <a href="#/home" class="brand">글리 출석</a>
-  <span id="user"></span>
-  <button type="button" id="logout" class="link" hidden>로그아웃</button>
+  <a href="#/home" class="brand" aria-label="글리 홈">
+    <span class="logo-window"><img src="/assets/glee-logo-2024.jpg" alt="Glee — Choir Club of Ajou" width="1668" height="1668"></span>
+  </a>
+  <div class="account">
+    <span id="user"></span>
+    <button type="button" id="logout" class="link" hidden>로그아웃</button>
+  </div>
 </header>
-<main id="view"></main>
+<nav id="tabs" class="tabs" aria-label="주 메뉴" hidden>
+  <a href="#/home" data-tab="attendance"><img class="ui-icon" src="/assets/attendance.svg" alt="" width="20" height="20">출석</a>
+  <a href="#/schedule" data-tab="schedule"><img class="ui-icon" src="/assets/calendar.svg" alt="" width="20" height="20">일정</a>
+</nav>
+<main id="view" tabindex="-1"></main>
+<footer class="app-footer">GLEE <span>CHOIR CLUB OF AJOU</span></footer>
+</div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="/app.js"></script>
 </body>

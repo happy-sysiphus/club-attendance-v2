@@ -5,7 +5,7 @@ def test_index_served_at_root(client):
     r = client.get("/")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
-    assert '<main id="view">' in r.text
+    assert 'id="view"' in r.text
 
 
 def test_static_assets_served(client):

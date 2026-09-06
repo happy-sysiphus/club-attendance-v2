@@ -5,7 +5,7 @@ from app import db
 from app.main import create_app
 
 SEED = [
-    ("지휘자", "c1", "soprano", "conductor"),
+    ("지휘자", "c1", "conductor", "conductor"),
     ("파트장소프라노", "ps", "soprano", "part_leader"),
     ("파트장알토", "pa", "alto", "part_leader"),
     ("파트장테너", "pt", "tenor", "part_leader"),

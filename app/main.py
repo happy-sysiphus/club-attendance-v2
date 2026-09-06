@@ -35,8 +35,15 @@ def require_conductor(member=Depends(current_member)) -> sqlite3.Row:
 
 
 def require_staff(member=Depends(current_member)) -> sqlite3.Row:
-    if member["role"] not in ("part_leader", "conductor"):
+    if (member["role"] not in ("part_leader", "conductor")
+            or (member["part"] == "accompanist" and member["role"] != "conductor")):
         raise HTTPException(403, "파트장·지휘자만 가능")
+    return member
+
+
+def require_attendee(member=Depends(current_member)) -> sqlite3.Row:
+    if not db.is_attendee(member):
+        raise HTTPException(403, "지휘자는 출석 대상이 아닙니다")
     return member
 
 
@@ -54,8 +61,8 @@ def create_app(db_path: str, notion=None) -> FastAPI:
                 app.state.notion.ensure_databases(conn)
                 empty = conn.execute(
                     "SELECT COUNT(*) FROM members").fetchone()[0] == 0
+                app.state.notion.refresh_roster(conn, app.state)
                 if empty:
-                    app.state.notion.refresh_roster(conn, app.state)
                     app.state.notion.restore_archive(conn, app.state)
             except Exception:
                 logging.getLogger("attendance").exception(
@@ -186,7 +193,7 @@ def register_routes(app: FastAPI) -> None:
         return {"deleted": pid}
 
     @app.get("/practices/{pid}/me")
-    def my_status(pid: int, conn=Depends(get_conn), me=Depends(current_member)):
+    def my_status(pid: int, conn=Depends(get_conn), me=Depends(require_attendee)):
         practice = get_practice(conn, pid)
         att = conn.execute(
             "SELECT * FROM attendance WHERE practice_id=? AND member_id=?",
@@ -195,7 +202,7 @@ def register_routes(app: FastAPI) -> None:
 
     @app.put("/practices/{pid}/me")
     def set_my_status(pid: int, body: StatusIn, conn=Depends(get_conn),
-                      me=Depends(current_member)):
+                      me=Depends(require_attendee)):
         practice = get_practice(conn, pid)
         if practice["status"] != "open":
             raise HTTPException(409, "마감된 연습")
@@ -216,7 +223,7 @@ def register_routes(app: FastAPI) -> None:
     def board(pid: int, request: Request, conn=Depends(get_conn),
               me=Depends(require_staff)):
         practice = get_practice(conn, pid)
-        visible = db.PARTS if me["role"] == "conductor" else [me["part"]]
+        visible = db.required_parts(conn) if me["role"] == "conductor" else [me["part"]]
         confirmed = {r["part"] for r in conn.execute(
             "SELECT part FROM part_confirmations WHERE practice_id=?", (pid,))}
         att_by_member = {r["member_id"]: r for r in conn.execute(
@@ -226,7 +233,8 @@ def register_routes(app: FastAPI) -> None:
             members, counts = [], {"present": 0, "late": 0, "absent": 0,
                                    "unconfirmed": 0}
             rows = conn.execute(
-                "SELECT * FROM members WHERE part=? AND active=1 ORDER BY name",
+                "SELECT * FROM members WHERE part=? AND active=1 AND "
+                + db.ATTENDEE_FILTER + " ORDER BY name",
                 (part,)).fetchall()
             for m in rows:
                 eff = effective_row(att_by_member.get(m["id"]), practice)
@@ -256,6 +264,10 @@ def register_routes(app: FastAPI) -> None:
             (member_id,)).fetchone()
         if target is None:
             raise HTTPException(404, "단원 없음")
+        if not db.is_attendee(target):
+            raise HTTPException(403, "지휘자는 출석 대상이 아닙니다")
+        if target["part"] == "accompanist" and me["role"] != "conductor":
+            raise HTTPException(403, "반주자 출석은 지휘자만 수정 가능")
         if me["role"] == "part_leader" and target["part"] != me["part"]:
             raise HTTPException(403, "자기 파트만 수정 가능")
         try:
@@ -276,7 +288,9 @@ def register_routes(app: FastAPI) -> None:
         if practice["status"] != "open":
             raise HTTPException(409, "마감된 연습")
         if body.part not in db.PARTS:
-            raise HTTPException(422, "part는 soprano/alto/tenor/bass 중 하나")
+            raise HTTPException(422, "part는 soprano/alto/tenor/bass/accompanist 중 하나")
+        if body.part == "accompanist" and me["role"] != "conductor":
+            raise HTTPException(403, "반주자 파트는 지휘자만 확인 가능")
         if me["role"] == "part_leader" and body.part != me["part"]:
             raise HTTPException(403, "자기 파트만 확인 가능")
         conn.execute(
@@ -295,12 +309,13 @@ def register_routes(app: FastAPI) -> None:
             confirmed = {r["part"] for r in conn.execute(
                 "SELECT part FROM part_confirmations WHERE practice_id=?",
                 (pid,))}
-            missing = [p for p in db.PARTS if p not in confirmed]
+            missing = [p for p in db.required_parts(conn) if p not in confirmed]
             if missing:
                 raise HTTPException(409, {"missing_parts": missing})
             existing = {r["member_id"]: r for r in conn.execute(
                 "SELECT * FROM attendance WHERE practice_id=?", (pid,))}
-            for m in conn.execute("SELECT id FROM members WHERE active=1"):
+            for m in conn.execute("SELECT id FROM members WHERE active=1 AND "
+                                  + db.ATTENDEE_FILTER):
                 row = existing.get(m["id"])
                 if row is None or row["status"] is None:
                     db.upsert_attendance(conn, pid, m["id"],
@@ -315,7 +330,7 @@ def register_routes(app: FastAPI) -> None:
         return {"status": "closed"}
 
     @app.get("/me/stats")
-    def my_stats(conn=Depends(get_conn), me=Depends(current_member)):
+    def my_stats(conn=Depends(get_conn), me=Depends(require_attendee)):
         counts = {"present": 0, "late": 0, "absent": 0}
         rows = conn.execute(
             """SELECT a.status, COUNT(*) AS n FROM attendance a

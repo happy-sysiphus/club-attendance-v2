@@ -1,4 +1,7 @@
-import { api, session, setSession, clearSession, esc, fmtDate, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
+import { api, session, setSession, clearSession, esc, fmtDate, todayKst, practiceLink, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
+import { practiceFormHtml, bindPracticeControls } from './practice-editor.js';
+import { calendarView } from './calendar.js';
+import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState } from './ui.js';
 
 const view = document.getElementById('view');
 let cleanup = null;
@@ -23,8 +26,18 @@ function failed() {
 
 function renderHeader() {
   const s = session();
-  document.getElementById('user').textContent = s ? `${s.name} · ${PART[s.part]} · ${ROLE[s.role]}` : '';
+  document.body.classList.toggle('is-login', !s);
+  document.getElementById('user').textContent = s
+    ? s.role === 'conductor' ? `${s.name} · 지휘자` : `${s.name} · ${PART[s.part]} · ${ROLE[s.role]}`
+    : '';
   document.getElementById('logout').hidden = !s;
+  const tabs = document.getElementById('tabs');
+  tabs.hidden = !s;
+  const active = location.hash === '#/schedule' ? 'schedule' : 'attendance';
+  tabs.querySelectorAll('a').forEach(link => {
+    if (link.dataset.tab === active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
 }
 document.getElementById('logout').onclick = () => { clearSession(); location.hash = '#/login'; };
 
@@ -32,13 +45,22 @@ document.getElementById('logout').onclick = () => { clearSession(); location.has
 async function loginView() {
   if (session()) { location.hash = '#/home'; return; }
   view.innerHTML = `
-    <form id="login" class="card stack">
-      <p class="eyebrow">이름과 학번으로 로그인</p>
-      <label>이름 <input name="name" required autocomplete="name"></label>
-      <label>학번 <input name="student_id" required autocomplete="off"></label>
-      <p id="login-err" class="err" hidden>명단에 없어요. 이름과 학번을 확인하세요.</p>
-      <button class="btn primary">로그인</button>
-    </form>`;
+    <section class="login-brand">
+      <span class="logo-window login-logo"><img src="/assets/glee-logo-2024.jpg" alt="Glee — Choir Club of Ajou" width="1668" height="1668"></span>
+      <p class="eyebrow">아주대학교 합창단 글리</p>
+      <h1>우리의 목소리가<br>하나 되는 시간.</h1>
+      <p class="muted">출석을 남기고, 다음 만남을 확인하세요.</p>
+    </section>
+    <section class="login-panel">
+      <div class="section-heading"><h2>반가워요!</h2><p class="muted">이름과 학번으로 시작해요.</p></div>
+      <form id="login" class="stack">
+        <label>이름 <input name="name" required autocomplete="name" placeholder="이름을 입력하세요"></label>
+        <label>학번 <input name="student_id" required autocomplete="off" placeholder="학번을 입력하세요" aria-describedby="login-err"></label>
+        <p id="login-err" class="err" role="alert" hidden>명단에 없어요. 이름과 학번을 확인하세요.</p>
+        <button class="btn primary full-width">로그인 ${icon('chevron-left', 'point-right inverse')}</button>
+      </form>
+      <p class="login-help">로그인이 되지 않나요?<br>이름과 학번을 확인한 뒤 지휘자에게 문의해 주세요.</p>
+    </section>`;
   view.querySelector('#login').onsubmit = async e => {
     e.preventDefault();
     const f = e.target.elements;
@@ -53,108 +75,67 @@ async function loginView() {
 }
 
 // ---------- 홈 ----------
-function practiceLink(p, role) {
-  return role === 'member' ? `#/practice/${p.id}` : `#/board/${p.id}`;
-}
-
 function nextPractice(list) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = todayKst();
   const open = list.filter(p => p.status === 'open');
-  const upcoming = open.filter(p => new Date(p.starts_at) >= today)
+  const upcoming = open.filter(p => p.starts_at.slice(0, 10) >= today)
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   return upcoming[0] || open[0] || null; // 목록은 최신순이라 open[0]이 가장 최근
 }
 
-function when(p) { return `${fmtDate(p.starts_at)}${p.place ? ' · ' + esc(p.place) : ''}`; }
-
 async function homeView() {
   const s = session();
   const list = await api('GET', '/practices');
-  const stats = await api('GET', '/me/stats');
+  const stats = s.role === 'conductor' ? null
+    : await api('GET', '/me/stats').catch(e => { if (e.status === 403) return null; throw e; }); // 낡은 세션(역할 변경)도 홈은 뜨게
   if (!location.hash.startsWith('#/home') && location.hash !== '') return;
   const next = nextPractice(list);
   const staff = s.role !== 'member';
   const conductor = s.role === 'conductor';
   view.innerHTML = `
+    <section class="page-heading">
+      <p class="eyebrow">${esc(s.name)}님, 반가워요</p>
+      <h1>${conductor ? '오늘의 연습을 준비해요.' : '오늘도, 함께 노래해요.'}</h1>
+      <p class="muted">${conductor ? '연습 일정과 파트별 출석을 한눈에 확인하세요.' : '다가오는 연습과 나의 출석을 확인하세요.'}</p>
+    </section>
+    <div class="home-overview ${stats ? '' : 'without-stats'}">
     ${next ? `
-    <section class="card">
-      <p class="eyebrow">다음 연습</p>
-      <h2 class="display">${esc(next.title)}</h2>
-      <p>${when(next)}</p>
-      <div class="row">
-        <a class="btn primary" href="#/practice/${next.id}">내 출석 입력</a>
-        ${staff ? `<a class="btn" href="#/board/${next.id}">현황판</a>` : ''}
+    <section class="card next-practice">
+      <div class="row between"><p class="eyebrow">다가오는 연습</p>${practiceBadge(next)}</div>
+      <div class="next-detail">${dateTile(next.starts_at)}<div><h2 class="display">${esc(next.title)}</h2>${practiceMeta(next)}</div></div>
+      <div class="row card-actions">
+        ${conductor ? '' : `<a class="btn primary" href="#/practice/${next.id}">내 출석 입력</a>`}
+        ${staff ? `<a class="btn ${conductor ? 'primary' : ''}" href="#/board/${next.id}">현황판</a>` : ''}
       </div>
-    </section>` : ''}
-    <section class="card">
-      <p class="eyebrow">내 출석률</p>
+    </section>` : `<section class="card next-practice">${emptyState('예정된 연습이 없어요', conductor ? '아래에서 새 연습을 등록해 주세요.' : '새로운 연습이 등록되면 이곳에 표시돼요.')}</section>`}
+    ${stats ? `<section class="card attendance-summary">
+      <div class="row between"><p class="eyebrow">나의 출석</p><span class="muted">마감 ${stats.total}회</span></div>
       ${stats.total
         ? `<p class="big">${Math.round(stats.rate * 100)}<span>%</span></p>
-           <p class="muted">출석 ${stats.present} · 지각 ${stats.late} · 결석 ${stats.absent} / 총 ${stats.total}</p>`
-        : '<p class="muted">아직 마감된 연습이 없어요</p>'}
-    </section>
-    <section class="stack">
-      <div class="row between">
-        <h2>연습</h2>
+           <progress class="attendance-progress" max="100" value="${Math.round(stats.rate * 100)}" aria-label="나의 출석률">${Math.round(stats.rate * 100)}%</progress>
+           <div class="stat-breakdown"><span>출석 <b>${stats.present}</b></span><span>지각 <b>${stats.late}</b></span><span>결석 <b>${stats.absent}</b></span></div>`
+        : '<p class="big muted">—</p><p class="muted">첫 연습이 마감되면<br>출석률을 확인할 수 있어요.</p>'}
+    </section>` : ''}
+    </div>
+    <section class="stack practice-section">
+      <div class="row between section-heading">
+        <h2>연습 목록 <span class="count-label">${list.length}</span></h2>
         ${conductor ? '<button type="button" id="new" class="btn small">새 연습</button>' : ''}
       </div>
-      ${list.length ? `<ul class="list">${list.map(p => `
+      ${list.length ? `<ul class="list practice-list">${list.map(p => `
         <li class="${p.status}">
-          <a href="${practiceLink(p, s.role)}">
-            <strong>${esc(p.title)}</strong>
-            <span class="muted">${when(p)}</span>
+          <a class="practice-link" href="${practiceLink(p, s.role)}">
+            ${dateTile(p.starts_at)}<span class="practice-copy"><strong>${esc(p.title)}</strong><span class="muted">${fmtDate(p.starts_at)}${p.place ? ' · ' + esc(p.place) : ''}</span></span>
           </a>
-          <span class="badge">${p.status === 'open' ? '진행중' : '마감'}</span>
+          <div class="list-actions">${practiceBadge(p)}
           ${conductor && p.status === 'open' ? `
-            <button type="button" class="icon" data-edit="${p.id}" aria-label="수정">✎</button>
-            <button type="button" class="icon" data-del="${p.id}" aria-label="삭제">✕</button>` : ''}
-        </li>`).join('')}</ul>` : '<p class="muted">연습이 없어요</p>'}
+            <button type="button" class="text-action" data-edit="${p.id}" aria-label="${esc(p.title)} 수정">수정</button>
+            <button type="button" class="text-action" data-del="${p.id}" aria-label="${esc(p.title)} 삭제">삭제</button>` : ''}</div>
+        </li>`).join('')}</ul>` : emptyState('등록된 연습이 없어요')}
     </section>
-    <dialog id="pform" aria-labelledby="pform-title">
-      <form class="stack">
-        <h2 id="pform-title">새 연습</h2>
-        <label>제목 <input name="title" required></label>
-        <label>시작 <input name="starts_at" type="datetime-local" required></label>
-        <label>장소 <input name="place"></label>
-        <div class="row">
-          <button type="button" id="pform-cancel" class="btn">취소</button>
-          <button class="btn primary">저장</button>
-        </div>
-      </form>
-    </dialog>`;
+    ${conductor ? practiceFormHtml() : ''}`;
 
-  if (!conductor) return;
-  const dlg = view.querySelector('#pform');
-  const form = dlg.querySelector('form');
-  const f = form.elements; // form.title은 HTML 속성이라 elements로 접근
-  const openForm = p => {
-    form.reset();
-    form.dataset.id = p ? p.id : '';
-    dlg.querySelector('#pform-title').textContent = p ? '연습 수정' : '새 연습';
-    if (p) { f.title.value = p.title; f.starts_at.value = p.starts_at.slice(0, 16); f.place.value = p.place; }
-    dlg.showModal();
-  };
-  view.querySelector('#new').onclick = () => openForm(null);
-  view.querySelector('#pform-cancel').onclick = () => dlg.close();
-  view.querySelectorAll('[data-edit]').forEach(b => {
-    b.onclick = () => openForm(list.find(p => p.id === Number(b.dataset.edit)));
-  });
-  view.querySelectorAll('[data-del]').forEach(b => {
-    b.onclick = async () => {
-      if (!confirm('이 연습을 삭제할까요?')) return;
-      try { await api('DELETE', `/practices/${b.dataset.del}`); toast('삭제했어요'); route(); }
-      catch (e) { toast(e.message, true); }
-    };
-  });
-  form.onsubmit = async e => {
-    e.preventDefault();
-    const id = form.dataset.id;
-    const body = { title: f.title.value, starts_at: f.starts_at.value, place: f.place.value };
-    try {
-      await api(id ? 'PUT' : 'POST', id ? `/practices/${id}` : '/practices', body);
-      dlg.close(); toast('저장했어요'); route();
-    } catch (err) { toast(err.message, true); }
-  };
+  if (conductor) bindPracticeControls(view, list, { refresh: route, toast });
 }
 
 // ---------- 상태 폼 (단원 본인 입력 · 현황판 수정 시트 공용) ----------
@@ -169,7 +150,7 @@ function statusForm(initial, locked) {
     </div>
     <label class="f-reason">사유 <input name="reason" value="${esc(initial.reason)}" placeholder="예: 수업, 버스 지연" ${dis}></label>
     <label class="f-eta">도착 예정 <input name="eta" type="time" value="${esc(initial.eta)}" ${dis}></label>
-    ${locked ? '' : '<button class="btn primary">저장</button>'}`;
+    ${locked ? '' : '<button class="btn primary full-width">출석 상태 저장</button>'}`;
   const f = form.elements;
   const sync = () => {
     const st = f.status.value;
@@ -200,22 +181,24 @@ function describe(me) {
 }
 
 async function practiceView(id) {
+  if (session().role === 'conductor') { location.hash = `#/board/${id}`; return; }
   const list = await api('GET', '/practices');
   const me = await api('GET', `/practices/${id}/me`);
   if (location.hash !== `#/practice/${id}`) return;
   const p = list.find(x => x.id === id);
   if (!p) throw new ApiError(404, '연습 없음');
-  const started = new Date() >= new Date(p.starts_at);
+  const started = new Date() >= new Date(`${p.starts_at}+09:00`);
   const closed = p.status === 'closed';
   view.innerHTML = `
-    <section class="card">
-      <p class="eyebrow">${closed ? '마감' : '진행중'}</p>
-      <h1 class="display">${esc(p.title)}</h1>
-      <p>${when(p)}</p>
+    ${backLink()}
+    <section class="page-heading">
+      <div class="row between"><p class="eyebrow">내 출석</p>${practiceBadge(p)}</div>
+      <h1>${esc(p.title)}</h1>
+      ${practiceMeta(p)}
     </section>
-    <section class="card stack">
-      <p class="eyebrow">내 상태</p>
-      <p class="current ${me.status ?? ''}">${describe(me)}</p>
+    <section class="card stack attendance-form-card">
+      <div class="current-status"><p class="eyebrow">현재 출석 상태</p><p class="current ${me.status ?? ''}">${describe(me)}</p></div>
+      ${!closed && !started ? '<div class="section-heading"><h2>이번 연습, 함께할 수 있나요?</h2><p class="muted">연습 시작 전까지 변경할 수 있어요.</p></div>' : ''}
       ${closed ? '<p class="muted">마감된 연습입니다.</p>'
         : started ? '<p class="muted">연습이 시작돼 파트장·지휘자만 수정할 수 있어요.</p>' : ''}
       <div id="form"></div>
@@ -240,10 +223,12 @@ async function boardView(id) {
   if (s.role === 'member') { toast('파트장·지휘자만 볼 수 있어요', true); location.hash = '#/home'; return; }
   const conductor = s.role === 'conductor';
   view.innerHTML = `
+    ${backLink()}
     <div id="board-head"></div>
     <div id="board-list" class="stack"></div>
     <dialog id="edit" aria-labelledby="edit-name">
       <div class="stack">
+        <p class="eyebrow">출석 상태 변경</p>
         <h2 id="edit-name"></h2>
         <div id="edit-form"></div>
         <button type="button" id="edit-cancel" class="btn">취소</button>
@@ -289,22 +274,25 @@ async function boardView(id) {
     const now = new Date().toTimeString().slice(0, 8);
     view.querySelector('#board-head').innerHTML = `
       ${data.roster_warnings.length ? `<div class="warn">명단 확인 필요<br>${data.roster_warnings.map(esc).join('<br>')}</div>` : ''}
-      <section class="card">
-        <p class="eyebrow">${open ? '진행중' : '마감'} · 갱신 ${now}</p>
-        <h1 class="display">${esc(p.title)}</h1>
-        <p>${when(p)}</p>
-        <div class="chips">
-          <span class="chip present">출석 ${data.totals.present}</span>
-          <span class="chip late">지각 ${data.totals.late}</span>
-          <span class="chip absent">결석 ${data.totals.absent}</span>
-          <span class="chip none">미확정 ${data.totals.unconfirmed}</span>
+      <section class="page-heading board-heading">
+        <div class="row between"><p class="eyebrow">${conductor ? '전체 출석 현황' : PART[s.part] + ' 출석 현황'}</p><span class="refresh-label">${now} 갱신</span></div>
+        <h1>${esc(p.title)}</h1>
+        ${practiceMeta(p)}
+      </section>
+      <section class="card board-summary">
+        <div class="summary-grid">
+          <div class="summary-stat present"><span>출석</span><strong>${data.totals.present}</strong></div>
+          <div class="summary-stat late"><span>지각</span><strong>${data.totals.late}</strong></div>
+          <div class="summary-stat absent"><span>결석</span><strong>${data.totals.absent}</strong></div>
+          <div class="summary-stat none"><span>미확정</span><strong>${data.totals.unconfirmed}</strong></div>
         </div>
         ${!conductor ? '' : open ? `
-          <div class="row" style="margin-top:12px">
-            <button type="button" id="close" class="btn primary" ${allConfirmed ? '' : 'disabled'}>마감</button>
-            ${allConfirmed ? '' : `<p class="muted">${missing.map(k => PART[k]).join('·')} 확인 대기</p>`}
+          <div class="board-close">
+            <div><p class="confirmation-label">파트 확인 <strong>${parts.length - missing.length} / ${parts.length}</strong></p>
+            <p class="muted">${allConfirmed ? '모든 파트 확인이 끝났어요.' : `${missing.map(k => PART[k]).join(' · ')} 확인 대기`}</p></div>
+            <button type="button" id="close" class="btn primary" ${allConfirmed ? '' : 'disabled'}>출석 마감</button>
           </div>` : `
-          <p class="muted" style="margin-top:12px">${p.notion_synced_at ? `노션 동기화 완료 ${p.notion_synced_at.slice(11, 16)}` : '노션 동기화 중…'}</p>
+          <p class="muted sync-message">${p.notion_synced_at ? `노션 동기화 완료 ${p.notion_synced_at.slice(11, 16)}` : '노션 동기화 중…'}</p>
           <div class="row">
             ${p.notion_synced_at ? '' : '<button type="button" id="resync" class="btn">동기화 재시도</button>'}
             <button type="button" id="reopen" class="btn">재오픈</button>
@@ -315,7 +303,7 @@ async function boardView(id) {
       return `
       <section class="part">
         <header class="row between">
-          <h2>${PART[k]}<small class="muted">출석 ${c.present} · 지각 ${c.late} · 결석 ${c.absent} · 미확정 ${c.unconfirmed}</small></h2>
+          <h2>${PART[k]} <span class="count-label">${part.members.length}명</span><small class="muted">출석 ${c.present} · 지각 ${c.late} · 결석 ${c.absent} · 미확정 ${c.unconfirmed}</small></h2>
           ${part.confirmed ? '<span class="badge done">확인 완료</span>'
             : open ? `<button type="button" class="btn small" data-confirm="${k}">확인 완료</button>` : ''}
         </header>
@@ -380,6 +368,7 @@ async function boardView(id) {
 const routes = [
   [/^#\/login$/, loginView],
   [/^#\/home$/, homeView],
+  [/^#\/schedule$/, () => calendarView(view, { refresh: route, toast })],
   [/^#\/practice\/(\d+)$/, practiceView],
   [/^#\/board\/(\d+)$/, boardView],
 ];
@@ -387,6 +376,7 @@ const routes = [
 let generation = 0;
 
 async function route() {
+  if (location.hash && !location.hash.startsWith('#/')) return; // #view 같은 일반 앵커(스킵링크)는 브라우저에 맡김
   const gen = ++generation;
   if (cleanup) { cleanup(); cleanup = null; }
   const hash = location.hash || '#/home';

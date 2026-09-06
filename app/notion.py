@@ -2,7 +2,8 @@ import json
 
 from . import db
 
-PART_KO = {"soprano": "소프라노", "alto": "알토", "tenor": "테너", "bass": "베이스"}
+PART_KO = {"soprano": "소프라노", "alto": "알토", "tenor": "테너", "bass": "베이스",
+           "accompanist": "반주자", "conductor": "지휘자"}
 ROLE_KO = {"member": "단원", "part_leader": "파트장", "conductor": "지휘자"}
 STATUS_KO = {"present": "출석", "late": "지각", "absent": "결석"}
 KO_PART = {v: k for k, v in PART_KO.items()}
@@ -82,10 +83,11 @@ class NotionStore:
 
     # ---------- bootstrap ----------
     def ensure_databases(self, conn):
-        """settings에 id가 있으면 no-op. 없으면 부모 페이지에서 기존 DB를
+        """기존 DB를 재사용하고 필요한 파트 선택지만 추가한다. ID가 없으면
         재발견(SQLite 유실 후 재부팅 시나리오)하고, 그래도 없으면 생성.
         재발견 없이는 재배포마다 노션에 새 DB가 중복 생성된다."""
         if self._get(conn, "roster_db_id") and self._get(conn, "attendance_db_id"):
+            self._ensure_part_options(conn)
             return
         existing = {}  # 제목 → database_id (child_database 블록 id == db id)
         children = self.client.blocks.children.list(
@@ -107,6 +109,33 @@ class NotionStore:
             self._set(conn, f"{key}_db_id", meta["id"])
             self._set(conn, f"{key}_prop_ids", json.dumps(
                 {n: p["id"] for n, p in meta["properties"].items()}))
+        conn.commit()
+        self._ensure_part_options(conn)
+
+    def _ensure_part_options(self, conn):
+        """기존 옵션의 ID와 이름을 보존하여 명단·출석 DB를 한 번 업그레이드."""
+        if self._get(conn, "parts_schema_version") == "1":
+            return
+        for key in ("roster", "attendance"):
+            database_id = self._get(conn, f"{key}_db_id")
+            meta = self.client.databases.retrieve(database_id=database_id)
+            part_id = self._prop_ids(conn, key).get("파트")
+            prop = next((p for p in meta["properties"].values()
+                         if p.get("id") == part_id), None)
+            if prop is None or "select" not in prop:
+                raise ValueError("노션 파트 속성은 선택(select) 형식이어야 합니다")
+            options = prop["select"]["options"]
+            names = {option["name"] for option in options}
+            missing = [name for name in PART_KO.values() if name not in names]
+            if missing:
+                # 기존 옵션은 ID만 전달해 색상과 이름을 유지한다.
+                preserved = [{"id": o["id"]} if o.get("id") else {"name": o["name"]}
+                             for o in options]
+                self.client.databases.update(
+                    database_id=database_id,
+                    properties={part_id: {"select": {
+                        "options": preserved + [{"name": name} for name in missing]}}})
+        self._set(conn, "parts_schema_version", "1")
         conn.commit()
 
     def _prop_ids(self, conn, key):
@@ -132,6 +161,10 @@ class NotionStore:
             v = _by_id(page, prop_ids)
             part = KO_PART.get(v.get("파트") or "")
             role = KO_ROLE.get(v.get("역할") or "") or "member"
+            if role == "conductor" or part == "conductor":
+                part, role = "conductor", "conductor"
+            elif part == "accompanist":
+                role = "member"  # 반주자 확인은 별도 파트장 없이 지휘자가 담당
             name, sid = v.get("이름"), v.get("학번")
             if not name or not sid or part is None:
                 warnings.append(
@@ -210,7 +243,8 @@ class NotionStore:
                 """SELECT a.id, a.status, a.reason, a.notion_page_id,
                           m.name, m.student_id, m.part
                    FROM attendance a JOIN members m ON m.id = a.member_id
-                   WHERE a.practice_id=?""", (practice_id,)).fetchall()
+                   WHERE a.practice_id=? AND m.role != 'conductor'
+                     AND m.part != 'conductor'""", (practice_id,)).fetchall()
             for r in rows:
                 props = {
                     "이름": {"title": [{"text": {"content": r["name"]}}]},

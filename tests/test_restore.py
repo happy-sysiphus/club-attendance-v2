@@ -9,7 +9,8 @@ from tests.test_close import confirm_all_parts
 from tests.test_me import PAST
 
 KO_PART = {"soprano": "소프라노", "alto": "알토",
-           "tenor": "테너", "bass": "베이스"}
+           "tenor": "테너", "bass": "베이스", "conductor": "지휘자",
+           "accompanist": "반주자"}
 KO_ROLE = {"member": "단원", "part_leader": "파트장", "conductor": "지휘자"}
 
 
@@ -63,7 +64,7 @@ def test_close_syncs_to_notion_in_background(tmp_path):
         confirm_all_parts(client, pid)
         assert client.post(f"/practices/{pid}/close").status_code == 200
         # TestClient는 응답 후 백그라운드 태스크를 즉시 실행
-        assert len(fake.dbs[att_db_id(app)]["pages"]) == 7
+        assert len(fake.dbs[att_db_id(app)]["pages"]) == 6
         assert app.state.conn.execute(
             "SELECT notion_synced_at FROM practices WHERE id=?",
             (pid,)).fetchone()[0] is not None

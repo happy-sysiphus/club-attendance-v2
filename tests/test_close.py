@@ -5,7 +5,7 @@ from tests.test_me import make_practice, FUTURE, PAST
 
 def confirm_all_parts(client, pid):
     login(client, "지휘자", "c1")
-    for part in db.PARTS:
+    for part in db.VOCAL_PARTS:
         assert client.post(f"/practices/{pid}/part/confirm",
                            json={"part": part}).status_code == 200
 
@@ -15,7 +15,7 @@ def test_close_blocked_until_all_parts_confirmed(client):
     login(client, "지휘자", "c1")
     r = client.post(f"/practices/{pid}/close")
     assert r.status_code == 409
-    assert set(r.json()["detail"]["missing_parts"]) == set(db.PARTS)
+    assert set(r.json()["detail"]["missing_parts"]) == set(db.VOCAL_PARTS)
 
 
 def test_close_materializes_auto_absent(client, conn):
@@ -25,7 +25,7 @@ def test_close_materializes_auto_absent(client, conn):
     rows = conn.execute(
         "SELECT status, source FROM attendance WHERE practice_id=?",
         (pid,)).fetchall()
-    assert len(rows) == 7  # 시드 전원 행 생성
+    assert len(rows) == 6  # 지휘자 제외
     assert all(r["status"] == "absent" and r["source"] == "auto" for r in rows)
     p = conn.execute("SELECT * FROM practices WHERE id=?", (pid,)).fetchone()
     assert p["status"] == "closed" and p["closed_at"] is not None
@@ -39,7 +39,7 @@ def test_close_excludes_inactive_members(client, conn):
     client.post(f"/practices/{pid}/close")
     assert conn.execute(
         "SELECT COUNT(*) FROM attendance WHERE practice_id=?",
-        (pid,)).fetchone()[0] == 6  # 활성 6명만 확정
+        (pid,)).fetchone()[0] == 5  # 지휘자와 비활성 단원 제외
 
 
 def test_close_keeps_entered_statuses(client, conn):
