@@ -70,6 +70,14 @@ def create_app(db_path: str, notion=None) -> FastAPI:
         yield
 
     app = FastAPI(lifespan=lifespan)
+
+    @app.middleware("http")
+    async def revalidate_frontend(request: Request, call_next):
+        # JS/CSS/HTML은 배포 후 낡은 캐시가 남지 않도록 항상 재검증 (ETag → 304)
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.endswith((".js", ".css", ".html")):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
     app.state.db_path = db_path
     app.state.conn = db.connect(db_path)
     app.state.notion = notion
