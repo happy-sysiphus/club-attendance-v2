@@ -59,7 +59,7 @@ async function loginView() {
         <p id="login-err" class="err" role="alert" hidden>명단에 없어요. 이름과 학번을 확인하세요.</p>
         <button class="btn primary full-width">로그인 ${icon('chevron-left', 'point-right inverse')}</button>
       </form>
-      <p class="login-help">로그인이 되지 않나요?<br>이름과 학번을 확인한 뒤 지휘자에게 문의해 주세요.</p>
+      <p class="login-help">로그인이 되지 않나요?<br>이름과 학번을 확인한 뒤 총무에게 문의해 주세요.</p>
     </section>`;
   view.querySelector('#login').onsubmit = async e => {
     e.preventDefault();
