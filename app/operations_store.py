@@ -23,6 +23,9 @@ log = logging.getLogger("attendance")
 CACHE_SECONDS = float(os.environ.get("NOTION_CACHE_SECONDS", "60"))
 # 재시도로 해결되지 않는 노션 오류 — 속성 이름·형식·권한 문제라 원인을 그대로 사용자에게 알린다.
 PERMANENT_CODES = {"validation_error", "object_not_found", "unauthorized", "restricted_resource", "invalid_request"}
+# 데이터베이스 위치를 환경변수 ID로 고정한다. 지정된 DB는 어느 페이지에 있어도 되고(통합 연결만 필요),
+# 재배포로 SQLite 캐시가 사라져도 제목 탐색·중복 생성 없이 그 ID를 쓴다. 미지정이면 부모 페이지에서 찾거나 만든다.
+ENV_IDS = {kind: f"NOTION_{kind.upper()}_DATABASE_ID" for kind in (*SCHEMAS, "roster", "ledger")}
 
 
 class NotionUnavailable(Exception):
@@ -76,35 +79,55 @@ class OperationsStore:
                 return pages
             cursor = result["next_cursor"]
 
+    def _retrieve(self, kind, label, database_id):
+        """DB 메타를 읽는다. 실패하면 어떤 DB·어떤 설정이 문제인지 그대로 말한다."""
+        try:
+            return self.call(self.client.databases.retrieve, database_id=database_id)
+        except NotionUnavailable as exc:
+            source = f"환경변수 {ENV_IDS[kind]}" if os.environ.get(ENV_IDS[kind]) else "저장된 ID"
+            raise NotionUnavailable(
+                f"'{label}' 데이터베이스({database_id})에 접근할 수 없습니다 — {source} 값이 맞는지, "
+                f"노션에서 그 DB(또는 상위 페이지)의 연결(Connections)에 통합이 추가돼 있는지 확인해 주세요.") from exc
+
     def bootstrap(self):
         if self.ready:
             return
+        env = {kind: os.environ.get(name, "").strip() for kind, name in ENV_IDS.items()}
+        # 명단·출석 기록은 기존 노션 계층이 관리한다. 환경변수 ID를 settings에 먼저 넣으면
+        # ensure_databases가 탐색·생성을 건너뛰고 파트 선택지만 보강한다.
+        for kind, setting in (("roster", "roster_db_id"), ("attendance", "attendance_db_id")):
+            if env[kind]:
+                self.notion._set(self.conn, setting, env[kind])
+        self.conn.commit()
         try:
             self.notion.ensure_databases(self.conn)
         except Exception as exc:
             raise NotionUnavailable("노션 명단·출석 데이터베이스 연결을 확인해 주세요.") from exc
-        existing, cursor = {}, None
-        while True:
-            args = {"block_id": self.notion.parent_page_id, "page_size": 100}
-            if cursor:
-                args["start_cursor"] = cursor
-            result = self.call(self.client.blocks.children.list, **args)
-            for block in result["results"]:
-                if block["type"] == "child_database":
-                    existing[block["child_database"]["title"]] = block["id"]
-            if not result.get("has_more"):
-                break
-            cursor = result["next_cursor"]
+        existing = {}
+        # 부모 페이지 스캔은 환경변수·캐시 어느 쪽에도 ID가 없는 DB가 있을 때만 (첫 설치 또는 미지정 재배포)
+        if any(not env[k] and not self.notion._get(self.conn, f"ops_{k}_id") for k in SCHEMAS if k != "attendance"):
+            cursor = None
+            while True:
+                args = {"block_id": self.notion.parent_page_id, "page_size": 100}
+                if cursor:
+                    args["start_cursor"] = cursor
+                result = self.call(self.client.blocks.children.list, **args)
+                for block in result["results"]:
+                    if block["type"] == "child_database":
+                        existing[block["child_database"]["title"]] = block["id"]
+                if not result.get("has_more"):
+                    break
+                cursor = result["next_cursor"]
         for kind, (name, fields) in SCHEMAS.items():
-            database_id = self.notion._get(self.conn, f"ops_{kind}_id") or existing.get(name)
+            database_id = env[kind] or self.notion._get(self.conn, f"ops_{kind}_id") or existing.get(name)
             if kind == "attendance":
-                database_id = self.notion._get(self.conn, "attendance_db_id")
+                database_id = env[kind] or self.notion._get(self.conn, "attendance_db_id")
             definitions = {}
             for field, (label, typ, *target) in fields.items():
                 definitions[label] = {typ: ({"database_id": self.ids[target[0]],
                                            "single_property": {}} if typ == "relation" else {})}
             if database_id:
-                meta = self.call(self.client.databases.retrieve, database_id=database_id)
+                meta = self._retrieve(kind, name, database_id)
                 missing = {k: v for k, v in definitions.items() if k not in meta["properties"]}
                 if missing:
                     meta = self.call(self.client.databases.update, database_id=database_id, properties=missing)
@@ -116,8 +139,8 @@ class OperationsStore:
             self.props[kind] = {field: meta["properties"][value[0]]["id"] for field, value in fields.items()}
             self.notion._set(self.conn, f"ops_{kind}_id", meta["id"])
             self.conn.commit()
-        roster_id = self.notion._get(self.conn, "roster_db_id")
-        roster = self.call(self.client.databases.retrieve, database_id=roster_id)
+        roster_id = env["roster"] or self.notion._get(self.conn, "roster_db_id")
+        roster = self._retrieve("roster", "명단", roster_id)
         admin_prop = roster["properties"].get("행정 직군")
         if admin_prop is None:
             self.call(self.client.databases.update, database_id=roster_id,
@@ -127,8 +150,8 @@ class OperationsStore:
             raise NotionUnavailable("노션 명단의 '행정 직군' 속성은 선택(select) 형식이어야 합니다.")
         self.ids["roster"] = roster_id
         # 실제 회계장부를 그대로 쓴다(스펙 §8). 개발·테스트 때는 NOTION_LEDGER_DATABASE_ID 로 사본을 지정할 것.
-        ledger_id = os.environ.get("NOTION_LEDGER_DATABASE_ID", "4379fa3860c94a498dbae5e444dd9afd")
-        ledger = self.call(self.client.databases.retrieve, database_id=ledger_id)
+        ledger_id = env["ledger"] or "4379fa3860c94a498dbae5e444dd9afd"
+        ledger = self._retrieve("ledger", "회계장부", ledger_id)
         additions = {}
         for field in ("semester", "key"):
             label, typ, *target = LEDGER[field]

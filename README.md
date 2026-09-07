@@ -11,6 +11,14 @@ pip install -r requirements.txt
 $env:NOTION_TOKEN = '<integration token>'
 $env:NOTION_PARENT_PAGE_ID = '<운영 부모 페이지 ID>'
 $env:NOTION_LEDGER_DATABASE_ID = '4379fa3860c94a498dbae5e444dd9afd'
+# 나머지 7개 DB도 ID로 고정 (아래 "노션 데이터베이스 ID 고정" 표) — 지정하면 위치와 무관, 미지정이면 부모 페이지에서 탐색·생성
+$env:NOTION_ROSTER_DATABASE_ID = '3c5749fe4c67814b9858cbb2d7778028'
+$env:NOTION_ATTENDANCE_DATABASE_ID = '3c5749fe4c678147bdc6fa4361f871a1'
+$env:NOTION_SEMESTERS_DATABASE_ID = '3d4749fe4c6781f0bfd5fd69c60aead9'
+$env:NOTION_EVENTS_DATABASE_ID = '3d4749fe4c678173b30ccc32ceb84074'
+$env:NOTION_SONGS_DATABASE_ID = '3d4749fe4c678118980fdace30a0e35f'
+$env:NOTION_MATERIALS_DATABASE_ID = '3d4749fe4c6781a4b8d7ff28632f10cc'
+$env:NOTION_ACKNOWLEDGEMENTS_DATABASE_ID = '3d4749fe4c67819abd7fddabb8de28e4'
 $env:SECRET_KEY = '<충분히 긴 임의의 문자열>'
 python -m app.main
 ```
@@ -18,6 +26,23 @@ python -m app.main
 `http://localhost:8000/`에 접속합니다. 노션 integration에 부모 페이지와 **기존 회계장부**를 모두 연결해야 합니다. `NOTION_LEDGER_DATABASE_ID`를 생략하면 제공받은 26-2 GLEE 장부를 사용합니다. 노션 연결 없이 임시 SQLite 저장으로 운영하지 않습니다.
 
 첫 인증 요청에서 명단·출석 기록을 재사용하고 전체 일정·학기 관리·전체 곡 목록·곡별 자료·자료 확인 기록 DB 및 필요한 속성을 준비합니다. 기존 회계장부를 새로 만들지 않으며 기존 수식과 분류를 유지합니다. 첫 학기는 2026년 2학기입니다.
+
+## 노션 데이터베이스 ID 고정
+
+앱이 쓰는 노션 DB 8개는 모두 환경변수로 ID를 지정할 수 있습니다. **지정된 DB는 노션 어디에 있어도 됩니다** — 해당 DB(또는 상위 페이지)에 integration이 연결돼 있기만 하면 됩니다. 지정하지 않은 DB는 재배포마다 `NOTION_PARENT_PAGE_ID` 페이지의 **직속 자식에서 제목으로** 다시 찾고, 없으면 새로 만듭니다. Render는 재배포 때 SQLite 캐시가 사라지므로 **전부 지정하는 것을 권장**합니다 — 그래야 DB를 옮기거나 제목을 바꿔도 빈 DB가 중복 생성되지 않습니다.
+
+| 환경변수 | 노션 DB | 현재 값 (2026-09-07) |
+| --- | --- | --- |
+| `NOTION_ROSTER_DATABASE_ID` | 명단 (`지휘부 / 출석`) | `3c5749fe4c67814b9858cbb2d7778028` |
+| `NOTION_ATTENDANCE_DATABASE_ID` | 출석 기록 (`지휘부 / 출석`) | `3c5749fe4c678147bdc6fa4361f871a1` |
+| `NOTION_SEMESTERS_DATABASE_ID` | 학기 관리 (`지휘부 / 출석`) | `3d4749fe4c6781f0bfd5fd69c60aead9` |
+| `NOTION_EVENTS_DATABASE_ID` | 전체 일정 (`지휘부 / 출석`) | `3d4749fe4c678173b30ccc32ceb84074` |
+| `NOTION_SONGS_DATABASE_ID` | 전체 곡 목록 (`지휘부 / 출석`) | `3d4749fe4c678118980fdace30a0e35f` |
+| `NOTION_MATERIALS_DATABASE_ID` | 곡별 자료 (`지휘부 / 출석`) | `3d4749fe4c6781a4b8d7ff28632f10cc` |
+| `NOTION_ACKNOWLEDGEMENTS_DATABASE_ID` | 자료 확인 기록 (`지휘부 / 출석`) | `3d4749fe4c67819abd7fddabb8de28e4` |
+| `NOTION_LEDGER_DATABASE_ID` | 26-2 GLEE 회계 장부 (`재정 (총무)`) | `4379fa3860c94a498dbae5e444dd9afd` (기본값) |
+
+ID는 노션에서 DB를 열었을 때 URL의 `/p/<32자리>` 부분입니다(대시 유무 무관). 접근이 안 되면 앱이 어떤 DB·어떤 변수가 문제인지 오류 문구로 알려줍니다. 회계장부는 `출석`과 다른 페이지 트리에 있으므로 integration을 **따로 연결**해야 합니다(장부 또는 `재정 (총무)` 페이지의 연결에 추가).
 
 ## 화면과 권한
 
@@ -40,7 +65,7 @@ python -m app.main
 
 - Build: `pip install -r requirements.txt`
 - Start: `python -m app.main`
-- 환경변수: `NOTION_TOKEN`, `NOTION_PARENT_PAGE_ID`, `SECRET_KEY`, 선택적으로 `NOTION_LEDGER_DATABASE_ID`, `DB_PATH`, `MAX_UPLOAD_MB`, `PORT`
+- 환경변수: `NOTION_TOKEN`, `NOTION_PARENT_PAGE_ID`, `SECRET_KEY`, 그리고 "노션 데이터베이스 ID 고정" 표의 `NOTION_*_DATABASE_ID` 8개(권장). 선택적으로 `DB_PATH`, `MAX_UPLOAD_MB`, `NOTION_CACHE_SECONDS`(기본 60초), `PORT`
 - 단일 프로세스/worker로 실행합니다. 복수 Notion 페이지 갱신은 프로세스 내 잠금으로 직렬화합니다.
 - `/health`는 프로세스와 설정 상태를 반환합니다. 노션 연결 테스트를 수행하는 endpoint는 아닙니다.
 - 학기별 Notion 보기는 2026-03-11 Views API로 준비합니다. 기존 데이터베이스 SDK는 기존 버전을 유지합니다.
@@ -50,4 +75,4 @@ python -m app.main
 
 기획: [합의된 요구사항](docs/2026-09-07-agreed-product-spec.md)
 
-사용자 요청에 따라 이번 구현에서는 **리뷰·테스트·브라우저 검증·실제 노션 업로드를 실행하지 않았습니다.** 다음 LLM의 검증 방법과 기대 결과는 [리뷰·검증 인수인계](docs/implementation-review-handoff.md)에 있습니다. 기존 SQLite 테스트는 새 운영 저장소에 맞춘 보완이 필요합니다.
+구현 직후의 검증 계획은 [리뷰·검증 인수인계](docs/implementation-review-handoff.md)에, 그 뒤 수행한 코드 리뷰·수정·격리 환경 실측(학기별 보기 API, 사진 업로드·삭제·교체, 분할 업로드) 결과는 [운영 확장 리뷰](docs/2026-09-07-operations-review.md)에 있습니다. 옛 SQLite 경로 테스트는 삭제했고 신규 코드의 자동 테스트는 아직 없습니다(인수인계 문서의 fake `OperationsStore` 권고 참고).
