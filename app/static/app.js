@@ -1,7 +1,7 @@
-import { api, session, setSession, clearSession, esc, fmtDate, todayKst, practiceLink, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
-import { practiceFormHtml, bindPracticeControls } from './practice-editor.js';
-import { calendarView } from './calendar.js';
+import { api, session, setSession, clearSession, esc, fmtDate, todayKst, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
 import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState } from './ui.js';
+import { loadOperations, getState, operationsHome, operationsCalendar, eventView, dayView, adminView } from './operations-ui.js';
+import { musicView, concertView, songView, financeView, settingsView } from './library-finance.js';
 
 const view = document.getElementById('view');
 let cleanup = null;
@@ -39,10 +39,15 @@ function renderHeader() {
     else link.removeAttribute('aria-current');
   });
 }
-document.getElementById('logout').onclick = () => { clearSession(); location.hash = '#/login'; };
+document.getElementById('logout').onclick = async () => {
+  try { await api('POST', '/auth/logout'); }
+  finally { clearSession(); sessionStorage.removeItem('glee-semester'); location.hash = '#/login'; }
+};
 
 // ---------- 로그인 ----------
 async function loginView() {
+  const toolbar = document.getElementById('semester-toolbar');
+  if (toolbar) toolbar.hidden = true;
   if (session()) { location.hash = '#/home'; return; }
   view.innerHTML = `
     <section class="login-brand">
@@ -72,70 +77,6 @@ async function loginView() {
       else toast(err.message, true);
     }
   };
-}
-
-// ---------- 홈 ----------
-function nextPractice(list) {
-  const today = todayKst();
-  const open = list.filter(p => p.status === 'open');
-  const upcoming = open.filter(p => p.starts_at.slice(0, 10) >= today)
-    .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
-  return upcoming[0] || open[0] || null; // 목록은 최신순이라 open[0]이 가장 최근
-}
-
-async function homeView() {
-  const s = session();
-  const list = await api('GET', '/practices');
-  const stats = s.role === 'conductor' ? null
-    : await api('GET', '/me/stats').catch(e => { if (e.status === 403) return null; throw e; }); // 낡은 세션(역할 변경)도 홈은 뜨게
-  if (!location.hash.startsWith('#/home') && location.hash !== '') return;
-  const next = nextPractice(list);
-  const staff = s.role !== 'member';
-  const conductor = s.role === 'conductor';
-  view.innerHTML = `
-    <section class="page-heading">
-      <p class="eyebrow">${esc(s.name)}님, 반가워요</p>
-      <h1>${conductor ? '오늘의 연습을 준비해요.' : '오늘도, 함께 노래해요.'}</h1>
-      <p class="muted">${conductor ? '연습 일정과 파트별 출석을 한눈에 확인하세요.' : '다가오는 연습과 나의 출석을 확인하세요.'}</p>
-    </section>
-    <div class="home-overview ${stats ? '' : 'without-stats'}">
-    ${next ? `
-    <section class="card next-practice">
-      <div class="row between"><p class="eyebrow">다가오는 연습</p>${practiceBadge(next)}</div>
-      <div class="next-detail">${dateTile(next.starts_at)}<div><h2 class="display">${esc(next.title)}</h2>${practiceMeta(next)}</div></div>
-      <div class="row card-actions">
-        ${conductor ? '' : `<a class="btn primary" href="#/practice/${next.id}">내 출석 입력</a>`}
-        ${staff ? `<a class="btn ${conductor ? 'primary' : ''}" href="#/board/${next.id}">현황판</a>` : ''}
-      </div>
-    </section>` : `<section class="card next-practice">${emptyState('예정된 연습이 없어요', conductor ? '아래에서 새 연습을 등록해 주세요.' : '새로운 연습이 등록되면 이곳에 표시돼요.')}</section>`}
-    ${stats ? `<section class="card attendance-summary">
-      <div class="row between"><p class="eyebrow">나의 출석</p><span class="muted">마감 ${stats.total}회</span></div>
-      ${stats.total
-        ? `<p class="big">${Math.round(stats.rate * 100)}<span>%</span></p>
-           <progress class="attendance-progress" max="100" value="${Math.round(stats.rate * 100)}" aria-label="나의 출석률">${Math.round(stats.rate * 100)}%</progress>
-           <div class="stat-breakdown"><span>출석 <b>${stats.present}</b></span><span>지각 <b>${stats.late}</b></span><span>결석 <b>${stats.absent}</b></span></div>`
-        : '<p class="big muted">—</p><p class="muted">첫 연습이 마감되면<br>출석률을 확인할 수 있어요.</p>'}
-    </section>` : ''}
-    </div>
-    <section class="stack practice-section">
-      <div class="row between section-heading">
-        <h2>연습 목록 <span class="count-label">${list.length}</span></h2>
-        ${conductor ? '<button type="button" id="new" class="btn small">새 연습</button>' : ''}
-      </div>
-      ${list.length ? `<ul class="list practice-list">${list.map(p => `
-        <li class="${p.status}">
-          <a class="practice-link" href="${practiceLink(p, s.role)}">
-            ${dateTile(p.starts_at)}<span class="practice-copy"><strong>${esc(p.title)}</strong><span class="muted">${fmtDate(p.starts_at)}${p.place ? ' · ' + esc(p.place) : ''}</span></span>
-          </a>
-          <div class="list-actions">${practiceBadge(p)}
-          ${conductor && p.status === 'open' ? `
-            <button type="button" class="text-action" data-edit="${p.id}" aria-label="${esc(p.title)} 수정">수정</button>
-            <button type="button" class="text-action" data-del="${p.id}" aria-label="${esc(p.title)} 삭제">삭제</button>` : ''}</div>
-        </li>`).join('')}</ul>` : emptyState('등록된 연습이 없어요')}
-    </section>
-    ${conductor ? practiceFormHtml() : ''}`;
-
-  if (conductor) bindPracticeControls(view, list, { refresh: route, toast });
 }
 
 // ---------- 상태 폼 (단원 본인 입력 · 현황판 수정 시트 공용) ----------
@@ -182,11 +123,11 @@ function describe(me) {
 
 async function practiceView(id) {
   if (session().role === 'conductor') { location.hash = `#/board/${id}`; return; }
-  const list = await api('GET', '/practices');
-  const me = await api('GET', `/practices/${id}/me`);
+  const list = getState().events;
+  const me = getState().my_attendance[id];
   if (location.hash !== `#/practice/${id}`) return;
   const p = list.find(x => x.id === id);
-  if (!p) throw new ApiError(404, '연습 없음');
+  if (!p || !me) throw new ApiError(404, '출석 대상 일정 없음');
   const started = new Date() >= new Date(`${p.starts_at}+09:00`);
   const closed = p.status === 'closed';
   view.innerHTML = `
@@ -203,7 +144,7 @@ async function practiceView(id) {
         : started ? '<p class="muted">연습이 시작돼 파트장·지휘자만 수정할 수 있어요.</p>' : ''}
       <div id="form"></div>
     </section>`;
-  const form = statusForm(me, closed || started);
+  const form = statusForm(me, closed || started || getState().stale);
   view.querySelector('#form').replaceWith(form);
   form.onsubmit = async e => {
     e.preventDefault();
@@ -245,7 +186,10 @@ async function boardView(id) {
     if (busy || !alive) return;
     if (!view.querySelector('#board-list')) return; // 뷰가 이미 교체됨
     busy = true;
-    try { data = await api('GET', `/practices/${id}/board`); }
+    try {
+      data = getState().boards[id];
+      if (!data) throw new ApiError(404, '출석 대상 일정 없음');
+    }
     catch (e) {
       if (e.status === 403 || e.status === 404) { toast(e.status === 404 ? '연습이 없어요' : e.message, true); location.hash = '#/home'; }
       else if (!data) { const h = view.querySelector('#board-head'); if (h) h.innerHTML = '<p class="muted">불러오지 못했어요. 다시 시도하는 중…</p>'; }
@@ -262,12 +206,13 @@ async function boardView(id) {
       const mp = e.detail && e.detail.missing_parts;
       toast(mp ? `${mp.map(k => PART[k]).join('·')} 확인이 필요해요` : e.message, true);
     }
+    try { await loadOperations(view, { refresh: route, toast }); } catch (e) { toast(e.message, true); }
     load();
     return ok;
   }
 
   function render() {
-    const p = data.practice, open = p.status === 'open';
+    const p = data.practice, open = p.status === 'open' && !getState().stale;
     const parts = PARTS.filter(k => data.parts[k]);
     const missing = parts.filter(k => !data.parts[k].confirmed);
     const allConfirmed = conductor && missing.length === 0;
@@ -341,7 +286,7 @@ async function boardView(id) {
     });
     view.querySelectorAll('[data-member]').forEach(b => {
       b.onclick = () => {
-        const mid = Number(b.dataset.member);
+        const mid = b.dataset.member;
         const m = Object.values(data.parts).flatMap(x => x.members).find(x => x.member_id === mid);
         q('#edit-name').textContent = m.name;
         const form = statusForm(m, false);
@@ -359,18 +304,26 @@ async function boardView(id) {
     });
   }
 
-  const timer = setInterval(load, 5000);
+  // The header refresh button reloads Notion. Avoid polling every database per 5 seconds.
   load();
-  return () => { alive = false; clearInterval(timer); };
+  return () => { alive = false; };
 }
 
 // ---------- 라우터 ----------
 const routes = [
   [/^#\/login$/, loginView],
-  [/^#\/home$/, homeView],
-  [/^#\/schedule$/, () => calendarView(view, { refresh: route, toast })],
-  [/^#\/practice\/(\d+)$/, practiceView],
-  [/^#\/board\/(\d+)$/, boardView],
+  [/^#\/home$/, operationsHome],
+  [/^#\/schedule$/, operationsCalendar],
+  [/^#\/day\/(\d{4}-\d{2}-\d{2})$/, dayView],
+  [/^#\/event\/([\w-]+)$/, eventView],
+  [/^#\/admin$/, adminView],
+  [/^#\/music$/, musicView],
+  [/^#\/concert\/([\w-]+)$/, concertView],
+  [/^#\/song\/([\w-]+)$/, songView],
+  [/^#\/finance$/, financeView],
+  [/^#\/settings$/, settingsView],
+  [/^#\/practice\/([\w-]+)$/, practiceView],
+  [/^#\/board\/([\w-]+)$/, boardView],
 ];
 
 let generation = 0;
@@ -387,7 +340,11 @@ async function route() {
   renderHeader();
   view.innerHTML = '<p class="muted">불러오는 중…</p>';
   try {
-    const done = (await fn(...hash.match(re).slice(1).map(Number))) || null;
+    if (fn !== loginView) {
+      await loadOperations(view, { refresh: route, toast, isCurrent: () => gen === generation });
+      if (gen !== generation) return;
+    }
+    const done = (await fn(...hash.match(re).slice(1))) || null;
     if (gen !== generation) { if (done) done(); return; } // 그 사이 다른 화면으로 이동
     cleanup = done;
   } catch (e) {

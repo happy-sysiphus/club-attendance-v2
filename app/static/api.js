@@ -23,7 +23,14 @@ export class ApiError extends Error {
   }
 }
 
+let readOnly = false;
+export function setReadOnly(value) { readOnly = Boolean(value); }
+export function isReadOnly() { return readOnly; }
+
 export async function api(method, path, body) {
+  if (readOnly && !['GET', 'HEAD'].includes(method) && !path.startsWith('/auth/')) {
+    throw new ApiError(503, '최신 정보가 아니에요. 연결을 복구한 뒤 다시 저장해 주세요.');
+  }
   let res;
   try {
     res = await fetch(path, {

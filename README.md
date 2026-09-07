@@ -1,60 +1,53 @@
-# 합창단 출석 관리
+# GLEE 출석·일정·운영 관리
 
-50명 이하 합창단의 연습 출석을 관리하는 FastAPI 앱. 노션이 영구 원본,
-SQLite는 휘발 작업장. 설계: docs/superpowers/specs/2026-07-24-attendance-backend-design.md
+FastAPI와 빌드 없는 HTML/JavaScript로 구성한 글리 운영 앱입니다. 노션이 기준 저장소이며, 저장 성공은 노션 쓰기가 끝난 뒤에만 반환합니다.
 
 ## 실행
 
-    pip install -r requirements.txt
-    set NOTION_TOKEN=secret_xxx
-    set NOTION_PARENT_PAGE_ID=xxxx
-    set SECRET_KEY=random-string
-    python -m app.main
+PowerShell 예시:
 
-노션 준비: 빈 페이지 하나 만들고 integration을 연결하면 앱이 첫 실행 때
-명단·출석 기록 DB를 자동 생성한다. 명단 관리는 노션에서 직접.
+```powershell
+pip install -r requirements.txt
+$env:NOTION_TOKEN = '<integration token>'
+$env:NOTION_PARENT_PAGE_ID = '<운영 부모 페이지 ID>'
+$env:NOTION_LEDGER_DATABASE_ID = '4379fa3860c94a498dbae5e444dd9afd'
+$env:SECRET_KEY = '<충분히 긴 임의의 문자열>'
+python -m app.main
+```
 
-## 화면
+`http://localhost:8000/`에 접속합니다. 노션 integration에 부모 페이지와 **기존 회계장부**를 모두 연결해야 합니다. `NOTION_LEDGER_DATABASE_ID`를 생략하면 제공받은 26-2 GLEE 장부를 사용합니다. 노션 연결 없이 임시 SQLite 저장으로 운영하지 않습니다.
 
-`python -m app.main` 후 `http://localhost:8000/` 접속. 프런트는 `app/static/`의
-순수 HTML+JS(빌드 없음)이며 같은 서버가 서빙한다. 설계:
-docs/superpowers/specs/2026-08-23-frontend-design.md
+첫 인증 요청에서 명단·출석 기록을 재사용하고 전체 일정·학기 관리·전체 곡 목록·곡별 자료·자료 확인 기록 DB 및 필요한 속성을 준비합니다. 기존 회계장부를 새로 만들지 않으며 기존 수식과 분류를 유지합니다. 첫 학기는 2026년 2학기입니다.
 
-- **출석 탭**: 기존 출석 입력·현황판·연습 관리.
-- **일정 탭**: 월간 달력, 이전·다음 달과 오늘 이동, 날짜별 연습 시간·장소.
-  단원은 출석 입력으로, 파트장·지휘자는 현황판으로 이동할 수 있다.
-  지휘자는 달력에서 선택한 날짜로 새 연습을 등록하고 기존 연습을 수정·삭제한다.
-- 별도 프런트엔드 라이브러리나 빌드 과정은 없다.
+## 화면과 권한
 
-## 파트와 출석 대상
+- 출석: 지휘·행정 구분 없이 오늘부터의 전체 일정을 가까운 날짜순으로 표시합니다. 연습·공연에서 기존 출석 규칙을 사용합니다.
+- 일정: 월간 캘린더, 지난 일정, 공연 날짜 강조, 날짜 목록·일정 상세와 사진을 제공합니다.
+- 지휘: 지휘자·파트장·반주자만 접근합니다. 공연별 곡, 전체 곡 라이브러리, 필기본·음원, 학기별 확인 기록을 관리합니다. 자료 편집은 지휘자만 가능합니다.
+- 행정: 단장·홍보가 모든 일정 사진을 관리합니다. 기한이 지난 사진 미등록 일정에 느낌표와 탭 배지를 표시합니다. 행정 일정 등록·수정은 단장만 가능합니다.
+- 재정: 모두 조회하고 총무만 편집합니다. 학기별 수입·지출·이월금·잔액과 분류별 지출을 표시합니다.
+- 학기: 단장이 마감하면 다음 학기가 자동 생성됩니다. 시작 전 일정은 자동 이동하고 과거 기록은 계속 조회·수정할 수 있습니다.
 
-명단의 파트: 소프라노 / 알토 / 테너 / 베이스 / 반주자 / 지휘자.
+명단은 노션에서 관리합니다. 음악 파트/역할과 행정 직군은 별개입니다. 행정 직군은 단장·홍보·총무 중 1개이며 단장/총무는 각각 활성 1명, 홍보는 여러 명을 허용합니다. 지휘자는 출석 대상에서 제외하고 반주자는 일반 단원과 동일하게 출석을 기록합니다. 반주자 파트 확인은 지휘자가 담당합니다.
 
-- 지휘자는 출석 입력·집계·자동 결석·파트 확인 대상에서 제외된다.
-  본인 출석률 대신 전체 현황판을 사용한다.
-- 반주자는 일반 단원과 같은 출석 입력·통계 규칙을 적용한다.
-  반주자 파트의 수정·확인은 지휘자가 맡으며 별도 파트장 권한을 부여하지 않는다.
-- 기존 성부 4개는 기존처럼 확인이 필요하다. 반주자는 **활성 반주자가 있을 때만**
-  마감 전 확인이 필요하며, 지휘자 확인 항목은 없다.
+## 저장과 파일
 
-업데이트 후 첫 실행에서 기존 SQLite 명단 테이블의 파트 제약을 확장하고
-기존 지휘자의 파트를 전환한다. 단원 ID와 과거 출석 기록은 보존한다.
-노션 연동 시 기존 명단·출석 DB의 선택지를 보존하면서 반주자·지휘자를 추가한다.
-노션 명단에서 지휘자 파트 또는 지휘자 역할은 지휘자로, 반주자 파트는 단원 역할로
-읽어 들인다. 명단은 서버 시작 시와 로그인 명단 불일치 시 갱신한다.
+노션에 일정, 출석, 사진, 곡, 파일, 확인 시각, 학기, 회계를 저장합니다. SQLite는 DB/보기 ID 캐시입니다. 페이지를 열면 노션에서 새로 불러옵니다. 조회 실패 시 마지막 내용에 최신 정보가 아님을 표시하고 편집을 막습니다.
 
-로컬 확인용 명단 시드(노션 없이):
+사진 JPG/PNG/HEIC, 필기본 PDF/이미지, 음원 MP3/M4A/WAV를 업로드합니다. 기본 서버 제한은 파일당 200MB이며 `MAX_UPLOAD_MB`로 조정할 수 있습니다. 노션 workspace 요금제의 파일 제한도 적용됩니다. HEIC 인라인 표시는 브라우저에 따라 다를 수 있어 원본 열기 링크를 제공합니다.
 
-    python -c "from tests.conftest import SEED; from app import db; c=db.connect('attendance.db'); c.executemany('INSERT OR IGNORE INTO members (name, student_id, part, role) VALUES (?,?,?,?)', SEED); c.commit()"
-
-## 배포 (Render 무료)
+## 배포 설정
 
 - Build: `pip install -r requirements.txt`
-- Start: `python -m app.main` (PORT 환경변수 자동 인식)
-- 환경변수: NOTION_TOKEN, NOTION_PARENT_PAGE_ID, SECRET_KEY
-- **슬립 방지**: cron-job.org에서 10분 간격 `GET /health` 등록 (무료 750h/월로 상시 가동)
-- 연습 당일 배포 금지 — 마감 전 사전 입력은 SQLite에만 있어 재시작 시 유실
+- Start: `python -m app.main`
+- 환경변수: `NOTION_TOKEN`, `NOTION_PARENT_PAGE_ID`, `SECRET_KEY`, 선택적으로 `NOTION_LEDGER_DATABASE_ID`, `DB_PATH`, `MAX_UPLOAD_MB`, `PORT`
+- 단일 프로세스/worker로 실행합니다. 복수 Notion 페이지 갱신은 프로세스 내 잠금으로 직렬화합니다.
+- `/health`는 프로세스와 설정 상태를 반환합니다. 노션 연결 테스트를 수행하는 endpoint는 아닙니다.
+- 학기별 Notion 보기는 2026-03-11 Views API로 준비합니다. 기존 데이터베이스 SDK는 기존 버전을 유지합니다.
+- 기존 정수 회원 ID 쿠키로는 재로그인이 필요합니다.
 
-## 테스트
+## 구현 및 다음 작업
 
-    pytest --basetemp=.pytest_tmp
+기획: [합의된 요구사항](docs/2026-09-07-agreed-product-spec.md)
+
+사용자 요청에 따라 이번 구현에서는 **리뷰·테스트·브라우저 검증·실제 노션 업로드를 실행하지 않았습니다.** 다음 LLM의 검증 방법과 기대 결과는 [리뷰·검증 인수인계](docs/implementation-review-handoff.md)에 있습니다. 기존 SQLite 테스트는 새 운영 저장소에 맞춘 보완이 필요합니다.

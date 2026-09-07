@@ -271,3 +271,48 @@ dialog h2 { font-size: 22px; margin-bottom: 8px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+/* Operations: shared controls follow the supplied wireframe's neutral surfaces. */
+select, textarea { font: inherit; width: 100%; min-width: 0; border: 1px solid transparent; border-radius: 12px; padding: 12px 14px; background: var(--surface); color: var(--ink); }
+textarea { resize: vertical; line-height: 1.7; }
+select:focus, textarea:focus { outline: 2px solid #747480; outline-offset: 2px; }
+.tabs { overflow-x: auto; }
+.tabs a { white-space: nowrap; padding-left: 12px; padding-right: 12px; gap: 5px; }
+.notification-badge { display: inline-flex; justify-content: center; align-items: center; background: #c33342; color: white; border-radius: 20px; min-width: 19px; height: 19px; padding: 0 5px; font-size: 10px; font-weight: 700; line-height: 1; }
+.photo-alert { display: inline-flex; justify-content: center; align-items: center; width: 19px; height: 19px; background: #c33342; color: white; border-radius: 50%; font-size: 12px; margin-left: 5px; }
+#semester-toolbar { margin: 18px 32px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.semester-label { flex-direction: row; align-items: center; gap: 8px; margin-right: auto; font-size: 11px; color: var(--muted); }
+.semester-label select { width: auto; max-width: 240px; font-size: 12px; padding: 9px 12px; }
+.notice-link { display: flex; justify-content: space-between; gap: 10px; text-decoration: none; margin: 0; }
+.concert-day { background: #f4f0fb; border-color: #ded3ef; }
+.concert-badge, .day-event.concert-badge { background: #e9def6; color: #5a3d7a; }
+.day-event.cancelled { text-decoration: line-through; opacity: .55; }
+.prose { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.song-program { margin: 0; padding-left: 24px; }
+.song-program li { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.photo-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.photo-grid figure { margin: 0; min-width: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.photo-grid img { display: block; width: 100%; aspect-ratio: 4/3; object-fit: cover; background: var(--surface); }
+.photo-grid figcaption { padding: 10px 14px; color: var(--muted); font-size: 11px; }
+.photo-grid figcaption > a { display: block; padding: 5px 0; }
+.check { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 400; }
+.check input[type=checkbox] { width: 18px; height: 18px; min-height: 18px; flex: 0 0 18px; accent-color: var(--ink); }
+.admin-fields { display: grid; gap: 16px; }
+.song-picker { max-height: 230px; overflow-y: auto; display: grid; gap: 12px; padding: 6px 2px; }
+.ack-row { padding: 12px 0; justify-content: space-between; flex-wrap: wrap; font-size: 12px; }
+details > summary { cursor: pointer; font-size: 13px; padding: 8px 0; }
+.balance { font-size: clamp(24px,5vw,38px); font-weight: 650; letter-spacing: -.04em; overflow-wrap: anywhere; }
+.category-summary { display: flex; gap: 8px; flex-wrap: wrap; }
+.ledger-row { padding: 18px 0; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+.income { color: var(--present); }
+.expense { color: var(--absent); }
+#finance-search { flex: 1; min-width: 140px; }
+#finance-filter { width: 95px; }
+.is-login #semester-toolbar { display: none; }
+@media (max-width: 700px) {
+  #semester-toolbar { margin: 16px 24px 0; }
+  .tabs a { padding: 10px 8px; font-size: 12px; }
+  .photo-grid { gap: 10px; }
+  .photo-grid figcaption { padding: 8px; }
+  .stat-breakdown { flex-wrap: wrap; }
+}
