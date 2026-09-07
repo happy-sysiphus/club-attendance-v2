@@ -4,6 +4,7 @@ Writes are synchronous. Stable operation keys recover creates after a lost respo
 Run a single application worker: the lock serializes compound Notion operations.
 """
 import copy
+import json
 import logging
 import math
 import os
@@ -93,16 +94,20 @@ class OperationsStore:
         if self.ready:
             return
         env = {kind: os.environ.get(name, "").strip() for kind, name in ENV_IDS.items()}
-        # 명단·출석 기록은 기존 노션 계층이 관리한다. 환경변수 ID를 settings에 먼저 넣으면
-        # ensure_databases가 탐색·생성을 건너뛰고 파트 선택지만 보강한다.
-        for kind, setting in (("roster", "roster_db_id"), ("attendance", "attendance_db_id")):
+        # 명단·출석 기록은 기존 노션 계층이 관리한다. 환경변수 ID가 있으면 그 계층이 탐색 때 저장하는
+        # 것과 같은 settings(DB ID + 속성 ID 맵)를 먼저 채워, ensure_databases가 탐색·생성을 건너뛰고
+        # 파트 선택지만 보강하게 한다. 속성 ID 맵이 없으면 _ensure_part_options가 '파트'를 못 찾아 실패한다.
+        for kind, label in (("roster", "명단"), ("attendance", "출석 기록")):
             if env[kind]:
-                self.notion._set(self.conn, setting, env[kind])
+                meta = self._retrieve(kind, label, env[kind])
+                self.notion._set(self.conn, f"{kind}_db_id", meta["id"])
+                self.notion._set(self.conn, f"{kind}_prop_ids",
+                                 json.dumps({n: p["id"] for n, p in meta["properties"].items()}))
         self.conn.commit()
         try:
             self.notion.ensure_databases(self.conn)
         except Exception as exc:
-            raise NotionUnavailable("노션 명단·출석 데이터베이스 연결을 확인해 주세요.") from exc
+            raise NotionUnavailable(f"노션 명단·출석 데이터베이스 연결을 확인해 주세요: {exc}") from exc
         existing = {}
         # 부모 페이지 스캔은 환경변수·캐시 어느 쪽에도 ID가 없는 DB가 있을 때만 (첫 설치 또는 미지정 재배포)
         if any(not env[k] and not self.notion._get(self.conn, f"ops_{k}_id") for k in SCHEMAS if k != "attendance"):
