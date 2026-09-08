@@ -66,11 +66,19 @@ async function loginView() {
       </form>
       <p class="login-help">로그인이 되지 않나요?<br>이름과 학번을 확인한 뒤 총무에게 문의해 주세요.</p>
     </section>`;
-  view.querySelector('#login').onsubmit = async e => {
+  const form = view.querySelector('#login');
+  try {
+    const saved = JSON.parse(localStorage.getItem('login')) || {};
+    form.elements.name.value = saved.name || '';
+    form.elements.student_id.value = saved.student_id || '';
+  } catch { /* 저장된 값 없음 */ }
+  form.onsubmit = async e => {
     e.preventDefault();
     const f = e.target.elements;
+    const creds = { name: f.name.value, student_id: f.student_id.value };
     try {
-      setSession(await api('POST', '/auth/login', { name: f.name.value, student_id: f.student_id.value }));
+      setSession(await api('POST', '/auth/login', creds));
+      localStorage.setItem('login', JSON.stringify(creds));
       location.hash = '#/home';
     } catch (err) {
       if (err.status === 401) view.querySelector('#login-err').hidden = false;
