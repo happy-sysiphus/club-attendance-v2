@@ -38,7 +38,7 @@ export async function loadOperations(root, callbacks) {
 
 function navigation() {
   const s = ui.state, active = location.hash.split('/')[1] || 'home';
-  document.getElementById('user').textContent = `${s.me.name} · ${PART[s.me.part]}${s.me.admin_role ? ' · '+adminNames[s.me.admin_role] : ''}`;
+  document.getElementById('user').textContent = `${s.me.name} · ${PART[s.me.part] || '파트 미정'}${s.me.admin_role ? ' · '+adminNames[s.me.admin_role] : ''}`;
   const tabs = [['home','출석'],['schedule','일정']];
   if (music()) tabs.push(['music','지휘',s.missing_materials.length]);
   if (photos()) tabs.push(['admin','행정',s.missing_photos.length]);

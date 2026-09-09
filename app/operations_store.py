@@ -237,12 +237,15 @@ class OperationsStore:
             p = page["properties"]
             val = lambda k: text_value(p.get(k, {}))
             sel = lambda k: (p.get(k, {}).get("select") or {}).get("name", "")
-            part, role = KO_PART.get(sel("파트")), KO_ROLE.get(sel("역할"), "member")
+            # 파트가 비어 있으면 '미정'(part="")으로 통과시킨다 — 로그인 후 본인이 고른다.
+            # 값이 있는데 못 알아보면 오타이므로 예전처럼 경고를 남기고 제외한다.
+            raw_part = sel("파트")
+            part, role = KO_PART.get(raw_part, ""), KO_ROLE.get(sel("역할"), "member")
             if part == "conductor" or role == "conductor":
                 part, role = "conductor", "conductor"
-            if not part or not val("이름") or not val("학번"):
+            if (raw_part and not part) or not val("이름") or not val("학번"):
                 # 파트 오타·이름/학번 누락 행. 조용히 빼면 그 단원이 출석 대상에서 사라지고 아무도 모른다 → 경고로 노출
-                warnings.append(f"명단 행 무시: 이름={val('이름') or '(없음)'} 학번={val('학번') or '(없음)'} 파트={sel('파트') or '(없음)'}")
+                warnings.append(f"명단 행 무시: 이름={val('이름') or '(없음)'} 학번={val('학번') or '(없음)'} 파트={raw_part or '(없음)'}")
                 continue
             result.append({"id": page["id"], "member_id": page["id"], "name": val("이름"),
                            "student_id": val("학번"), "part": part,
@@ -297,6 +300,12 @@ class OperationsStore:
             rows = [r for r in hit[0] if r["id"] != page["id"]]
             rows.append(self._row(kind, page))
             self._cache[kind] = (rows, hit[1])
+
+    def set_part(self, member_id, korean_part):
+        """명단의 '파트'만 고친다. roster는 SCHEMAS에 없어 save()의 속성 ID 맵을 쓸 수 없다."""
+        self.call(self.client.pages.update, page_id=member_id,
+                  properties={"파트": {"select": {"name": korean_part}}})
+        self._cache.pop("roster", None)   # 다음 조회에서 노션 명단을 다시 읽는다
 
     def delete(self, page_id):
         # Notion's API delete is archive; no extra application deletion history.

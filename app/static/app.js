@@ -28,7 +28,7 @@ function renderHeader() {
   const s = session();
   document.body.classList.toggle('is-login', !s);
   document.getElementById('user').textContent = s
-    ? s.role === 'conductor' ? `${s.name} · 지휘자` : `${s.name} · ${PART[s.part]} · ${ROLE[s.role]}`
+    ? s.role === 'conductor' ? `${s.name} · 지휘자` : `${s.name} · ${PART[s.part] || '파트 미정'} · ${ROLE[s.role]}`
     : '';
   document.getElementById('logout').hidden = !s;
   const tabs = document.getElementById('tabs');
@@ -85,6 +85,43 @@ async function loginView() {
       else toast(err.message, true);
     }
   };
+}
+
+// ---------- 파트 선택 (파트 미정 단원, 로그인 후 1회) ----------
+const CHOOSABLE = ['soprano', 'alto', 'tenor', 'bass']; // 반주자·지휘자는 지휘자가 노션에서 지정
+function partPicker() {
+  const d = document.createElement('dialog');
+  d.className = 'part-picker';
+  d.setAttribute('aria-labelledby', 'part-picker-title');
+  d.innerHTML = `
+    <form class="stack">
+      <h2 id="part-picker-title">파트를 선택해 주세요</h2>
+      <p class="muted">출석은 파트별로 관리돼요. 한 번 정하면 바꿀 수 없고, 변경은 지휘자에게 문의해 주세요.</p>
+      <div class="segment" role="radiogroup" aria-label="파트">
+        ${CHOOSABLE.map(v => `<label><input type="radio" name="part" value="${v}"><span>${PART[v]}</span></label>`).join('')}
+      </div>
+      <p class="err" role="alert" hidden></p>
+      <button class="btn primary full-width" disabled>선택 완료</button>
+    </form>`;
+  document.body.append(d);
+  const form = d.querySelector('form'), btn = form.querySelector('button'), err = form.querySelector('.err');
+  form.oninput = () => { btn.disabled = !form.elements.part.value; };
+  d.addEventListener('cancel', e => e.preventDefault()); // Esc 로 닫지 못한다 — 고르기 전에는 앱을 쓸 수 없다
+  form.onsubmit = async e => {
+    e.preventDefault();
+    btn.disabled = true;
+    err.hidden = true;
+    try {
+      await api('POST', '/api/me/part', { part: form.elements.part.value });
+      d.remove();
+      route();
+    } catch (ex) {
+      err.textContent = ex.message;
+      err.hidden = false;
+      btn.disabled = false;
+    }
+  };
+  d.showModal();
 }
 
 // ---------- 상태 폼 (단원 본인 입력 · 현황판 수정 시트 공용) ----------
@@ -351,6 +388,8 @@ async function route() {
     if (fn !== loginView) {
       await loadOperations(view, { refresh: route, toast, isCurrent: () => gen === generation });
       if (gen !== generation) return;
+      // 파트를 고르기 전에는 어떤 화면도 그리지 않는다. 창은 고른 뒤 route() 를 다시 돌린다.
+      if (!getState().me.part) { if (!document.querySelector('.part-picker')) partPicker(); return; }
     }
     const done = (await fn(...hash.match(re).slice(1))) || null;
     if (gen !== generation) { if (done) done(); return; } // 그 사이 다른 화면으로 이동

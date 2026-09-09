@@ -78,6 +78,10 @@ def install(app, notion, conn):
     def state(semester: str | None = None, fresh: bool = False, member_id=Depends(identity)):
         return available().snapshot(member_id, semester, fresh)
 
+    @app.post("/api/me/part")
+    def choose_part(body: dict = Body(...), member_id=Depends(identity)):
+        return execute(member_id, operations.choose_part, body)
+
     @app.post("/api/events", status_code=201)
     def event_create(body: dict = Body(...), member_id=Depends(identity)):
         return execute(member_id, operations.save_event, body)

@@ -227,6 +227,15 @@ class Operations:
         data = self.load()
         return data, self.member(data, member_id)
 
+    def choose_part(self, data, me, body):
+        # 파트 미정 단원이 로그인 직후 한 번만 고른다. 이후 변경은 지휘자가 노션에서 한다.
+        require(not me["part"], "파트가 이미 정해져 있습니다. 변경은 지휘자에게 문의해 주세요")
+        part = text(body, "part", True)
+        if part not in db.VOCAL_PARTS:   # 반주자·지휘자는 본인이 고를 수 없다
+            raise HTTPException(422, "파트를 선택해 주세요")
+        self.store.set_part(me["id"], PART_KO[part])
+        return {"part": part}
+
     def event_permission(self, me, event):
         require(me["role"] == "conductor" if event["category"] == "지휘" else me["admin_role"] == "head")
 
@@ -406,6 +415,7 @@ class Operations:
         event = self.attendance_event(data, event_id)
         target = self.member(data, target_id or me["id"])
         require(target["role"] != "conductor", "지휘자는 출석 대상이 아닙니다")
+        require(target["part"], "파트를 먼저 선택해 주세요")
         if target_id:
             require(me["role"] == "conductor" or (me["role"] == "part_leader" and me["part"] == target["part"] and target["part"] != "accompanist"))
         attendance = next((a for a in data["attendance"] if a["event"] == event_id and a["member"] == target["id"]), None)
@@ -475,7 +485,8 @@ class Operations:
         if missing:
             raise HTTPException(409, {"missing_parts": missing})
         for m in data["members"]:
-            if not m["active"] or m["role"] == "conductor":
+            # 파트 미선택자는 현황판 어느 파트에도 없다 → 자동 결석 기록도 만들지 않는다
+            if not m["active"] or m["role"] == "conductor" or not m["part"]:
                 continue
             a = next((a for a in data["attendance"] if a["event"] == event_id and a["member"] == m["id"]), None)
             if not a or not a["status"]:
