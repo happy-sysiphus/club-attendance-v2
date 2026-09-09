@@ -51,7 +51,7 @@ async function loginView() {
   if (session()) { location.hash = '#/home'; return; }
   view.innerHTML = `
     <section class="login-brand">
-      <span class="logo-window login-logo"><img src="/assets/glee-logo-2024.jpg" alt="Glee — Choir Club of Ajou" width="1668" height="1668"></span>
+      <span class="logo-window login-logo"><img src="/assets/glee-logo.svg" alt="Glee — Choir Club of Ajou" width="1256" height="778"></span>
       <p class="eyebrow">아주대학교 합창단 글리</p>
       <h1>우리의 목소리가<br>하나 되는 시간.</h1>
       <p class="muted">출석을 남기고, 다음 만남을 확인하세요.</p>

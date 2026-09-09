@@ -1,6 +1,6 @@
 # Design assets
 
-- `glee-logo-2024.jpg`: user-provided Glee logo, copied without altering the image. CSS clips the surrounding whitespace for display.
+- `glee-logo-2024.jpg`: user-provided Glee logo, copied without altering the image. Kept as the original source; no longer referenced by the app (the SVG below replaced it on screen and as the icon).
 - `glee-logo.svg`: user-provided transparent vector of the same logo (2026-09-09). Tab icon for browsers that accept SVG favicons.
 - `glee-icon.png`: `glee-logo.svg` rasterized onto a white 1024x1024 canvas (logo width 86%, shifted 3% above center). iOS ignores SVG and paints transparency black, so the home-screen icon needs this opaque PNG. Regenerate instead of editing by hand.
 - `attendance.svg`: Figma `contact_emergency`, outlined variant (`51:51972`).

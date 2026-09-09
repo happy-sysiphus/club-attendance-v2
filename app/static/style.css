@@ -29,8 +29,9 @@ button:disabled { cursor: not-allowed; }
 .app-shell { width: min(100%, 920px); min-height: calc(100dvh - 48px); margin: 24px auto; background: white; border: 1px solid var(--line); border-radius: 24px; display: flex; flex-direction: column; }
 .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 32px 16px; }
 .brand { display: inline-flex; flex: 0 0 auto; text-decoration: none; }
-.logo-window { display: block; position: relative; overflow: hidden; width: 96px; aspect-ratio: 1.6; background: white; }
-.logo-window > img { position: absolute; width: 133.4%; max-width: none; height: auto; left: -15%; top: -52%; }
+/* 로고 SVG는 여백 없이 잘려 있고 투명하다 — 예전 JPG용 크롭·흰 배경은 필요 없다 */
+.logo-window { display: block; width: 96px; }
+.logo-window > img { display: block; width: 100%; height: auto; }
 .account { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; }
 #user { font-size: 12px; font-weight: 500; text-align: right; overflow-wrap: anywhere; }
 .link { background: none; border: 0; color: var(--muted); font-size: 11px; padding: 4px 0 4px 12px; min-height: 32px; }
