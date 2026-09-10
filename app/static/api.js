@@ -25,7 +25,14 @@ function withMixpanel(fn) {
 }
 import('https://cdn.mxpnl.com/libs/mixpanel-js/dist/mixpanel.module.js').then(m => {
   mp = m.default;
-  mp.init(MIXPANEL_TOKEN);
+  mp.init(MIXPANEL_TOKEN, {
+    // 세션 리플레이. 기본값이 0 이라 켜 주지 않으면 녹화가 시작되지 않는다.
+    // 30명 규모라 표본을 줄일 이유가 없다.
+    record_sessions_percent: 100,
+    // 마스킹은 기본값을 그대로 둔다(record_mask_all_text: true). 이름·학번·금액이
+    // 전부 가려지고 화면 구조와 조작 위치만 남는다 — 동선 확인엔 그걸로 충분하다.
+    // 녹화 엔진(rrweb)은 이 모듈에 포함돼 있어 별도 번들을 받지 않는다.
+  });
   const waiting = queued;
   queued = null;
   waiting.forEach(fn => { try { fn(mp); } catch { /* 무시 */ } });
