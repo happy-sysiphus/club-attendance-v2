@@ -1,4 +1,4 @@
-import { api, session, setSession, clearSession, esc, fmtDate, todayKst, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
+import { api, session, setSession, clearSession, track, esc, fmtDate, todayKst, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
 import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState, describe } from './ui.js';
 import { loadOperations, getState, operationsHome, operationsCalendar, eventView, dayView, adminView } from './operations-ui.js';
 import { musicView, concertView, songView, financeView, settingsView } from './library-finance.js';
@@ -385,6 +385,7 @@ async function route() {
   if (!match) { location.hash = '#/home'; return; }
   const [re, fn] = match;
   if (fn !== loginView && !session()) { location.hash = '#/login'; return; }
+  track('page_view', { route: hash.split('/')[1] || 'home' });
   renderHeader();
   view.innerHTML = '<p class="muted">불러오는 중…</p>';
   try {

@@ -12,8 +12,20 @@ export function session() {
     return s;
   } catch { return null; }
 }
-export function setSession(s) { localStorage.setItem('session', JSON.stringify(s)); }
-export function clearSession() { localStorage.removeItem('session'); }
+export function setSession(s) {
+  localStorage.setItem('session', JSON.stringify(s));
+  // 분석 도구가 차단·미로딩이어도 로그인은 그대로 동작해야 한다 — 실패는 조용히 무시.
+  try { window.mixpanel?.identify(s.id); window.mixpanel?.people.set({ part: s.part, role: s.role, admin_role: s.admin_role || '' }); } catch { /* 무시 */ }
+}
+export function clearSession() {
+  localStorage.removeItem('session');
+  try { window.mixpanel?.reset(); } catch { /* 무시 */ }
+}
+
+// 이름·학번·자유 텍스트(사유·비고 등)는 절대 보내지 않는다. 상태값과 경로 종류만.
+export function track(event, props) {
+  try { window.mixpanel?.track(event, props); } catch { /* 무시 */ }
+}
 
 export class ApiError extends Error {
   constructor(status, detail) {
@@ -49,6 +61,13 @@ export async function api(method, path, body) {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.detail ?? res.statusText);
+  // 핵심 행동 몇 가지만 여기 한 곳에서 추적한다 — 저장 지점마다 손대지 않도록.
+  // 값이 아니라 종류만 보낸다: 상태(출석/지각/결석)와 누가 입력했는지(본인/파트장·지휘자).
+  if (path === '/auth/login') track('login');
+  else if (path === '/auth/logout') track('logout');
+  else if (method === 'PUT' && body?.status && /^\/practices\/[\w-]+\/(me|members\/[\w-]+)$/.test(path)) {
+    track('attendance_marked', { status: body.status, source: path.includes('/members/') ? 'staff' : 'self' });
+  }
   return data;
 }
 
