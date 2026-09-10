@@ -1,4 +1,4 @@
-import { esc, fmtDate, todayKst } from './api.js';
+import { esc, fmtDate, todayKst, STATUS } from './api.js';
 
 // Figma에서 내보낸 원본 아이콘. 글리 로고도 제공받은 JPG 원본을 사용한다.
 export function icon(name, extra = '') {
@@ -27,4 +27,13 @@ export function backLink() {
 
 export function emptyState(title, description = '') {
   return `<div class="empty-state">${icon('calendar')}<strong>${esc(title)}</strong>${description ? `<p class="muted">${esc(description)}</p>` : ''}</div>`;
+}
+
+// 출석 상태 한 줄 요약. 내 출석 화면·홈 카드가 같이 쓴다.
+export function describe(me) {
+  if (me.status == null) return '미입력';
+  let s = STATUS[me.status] + (me.source === 'auto' ? '(자동)' : '');
+  if (me.status === 'late') s += ` · ${esc(me.reason)} · 도착 ${esc(me.eta)}`;
+  else if (me.reason) s += ` · ${esc(me.reason)}`;
+  return s;
 }

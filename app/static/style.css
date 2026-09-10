@@ -180,6 +180,17 @@ input::-webkit-date-and-time-value { text-align: left; }
 .m > button > strong { font-size: 14px; font-weight: 500; }
 .m > button > .muted { grid-column: 1 / -1; font-size: 12px; }
 .m > button:disabled { cursor: default; }
+/* 한 번 누르면 저장되는 출석 세그먼트 — 홈 카드와 현황판 줄이 같이 쓴다.
+   라디오가 아니라 버튼: 눌린 표시는 서버 상태에서만 오므로 실패해도 되돌릴 게 없고, 방향키로 저장되지 않는다. */
+.segment button { display: block; width: 100%; min-height: 48px; padding: 13px 6px; text-align: center; color: var(--muted); font-size: 14px; border: 0; background: none; border-radius: 9px; }
+.segment button[aria-pressed="true"] { background: white; color: var(--ink); font-weight: 600; box-shadow: 0 2px 4px #1c1b1f0d; }
+.segment button:disabled { opacity: .5; cursor: default; }
+.segment button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.quick-status button { min-height: 40px; padding: 9px 4px; font-size: 13px; }
+.list > li.m { gap: 8px; }
+.m > button { flex: 1; }
+.m > .quick-status { flex: 0 0 186px; }
+@media (max-width: 390px) { .list > li.m { flex-wrap: wrap; padding-bottom: 10px; } .m > .quick-status { flex-basis: 100%; } }
 dialog { border: 0; border-radius: 24px; width: calc(100% - 40px); max-width: 460px; max-height: calc(100dvh - 48px); overflow-y: auto; margin: auto; padding: 28px; color: var(--ink); background: white; box-shadow: 0 20px 80px #00000020; }
 dialog::backdrop { background: #1c1b1f66; backdrop-filter: blur(3px); }
 dialog h2 { font-size: 22px; margin-bottom: 8px; }

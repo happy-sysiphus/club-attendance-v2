@@ -1,5 +1,5 @@
-import {api, esc, fmtDate, todayKst, session, setSession, setReadOnly, isReadOnly, PART} from './api.js';
-import {dateTile, emptyState} from './ui.js';
+import {api, esc, fmtDate, todayKst, session, setSession, setReadOnly, isReadOnly, PART, STATUS} from './api.js';
+import {dateTile, emptyState, describe} from './ui.js';
 
 export const ui = {state: null, root: null, refresh: null, toast: null};
 export const getState = () => ui.state;
@@ -80,16 +80,49 @@ export function dialog(title, contents, submit, onSave) {
   d.showModal(); return d;
 }
 
+// ---------- 다음 연습 카드: 홈에서 바로 출석 저장, 파트장·지휘자는 현황판 1탭 ----------
+function lateSheet(practice) {
+  dialog('지각 사유', `${input('reason','사유','','text',true)}<label>도착 예정<input name="eta" type="time" required></label>`, '저장', async f => {
+    await api('PUT', `/practices/${practice.id}/me`, {status:'late', reason:f.reason.value.trim(), eta:f.eta.value});
+    ui.toast('지각으로 저장했어요'); await ui.refresh();
+  });
+}
+
+async function quickSave(practice, status) {
+  try { await api('PUT', `/practices/${practice.id}/me`, {status}); ui.toast(`${STATUS[status]}으로 저장했어요`); }
+  catch (e) { ui.toast(e.message, true); }
+  await ui.refresh();
+}
+
+function practiceCard(p) {
+  const s=ui.state, me=s.me, mine=s.my_attendance[p.id], board=s.boards?.[p.id];
+  const started=new Date()>=new Date(`${p.starts_at}+09:00`), closed=p.status==='closed', editable=!closed&&!started;
+  const note=closed?'마감된 연습이에요.':started?'연습이 시작돼 파트장·지휘자만 수정할 수 있어요.':mine?.status?`현재 · ${describe(mine)}`:'아직 입력 전이에요. 한 번 누르면 저장돼요.';
+  const self=mine?`<div class="segment quick-status" role="group" aria-label="내 출석">${['present','late','absent'].map(v=>`<button type="button" data-quick-me="${v}" aria-pressed="${mine.status===v}" data-write ${editable?'':'disabled'}>${STATUS[v]}</button>`).join('')}</div><p class="muted">${note}</p>`:'';
+  let summary='';
+  if(board&&conductor()){
+    const t=board.totals, parts=Object.values(board.parts), done=parts.filter(x=>x.confirmed).length;
+    summary=`<p class="muted">출석 ${t.present} · 지각 ${t.late} · 결석 ${t.absent} · 미확정 ${t.unconfirmed} · 파트 확인 ${done}/${parts.length}</p><a class="btn primary" href="#/board/${p.id}">전체 현황</a>`;
+  } else if(board?.parts[me.part]){
+    const x=board.parts[me.part], c=x.counts;
+    summary=`<p class="muted">${PART[me.part]} ${x.members.length}명 · 출석 ${c.present} · 지각 ${c.late} · 미확정 ${c.unconfirmed} · ${x.confirmed?'확인 완료':'확인 전'}</p><a class="btn primary" href="#/board/${p.id}">우리 파트 현황</a>`;
+  }
+  return `<section class="card next-practice"><div class="row between"><p class="eyebrow">다음 연습</p><div class="row">${tag(p)}<a class="text-action" href="#/event/${p.id}">일정 자세히</a></div></div><div class="next-detail">${dateTile(p.starts_at)}<div><h2>${esc(p.title)}</h2><p class="muted">${esc(dateText(p))}<br>${esc(p.place)}</p></div></div>${self}${summary}</section>`;
+}
+
 export function operationsHome() {
   const s=ui.state, today=todayKst(), events=s.events.filter(e=>!canceled(e)&&(e.ends_at||e.starts_at).slice(0,10)>=today).sort((a,b)=>a.starts_at.localeCompare(b.starts_at));
-  const next=events[0], stats=s.stats;
+  const next=events[0], stats=s.stats, practice=events.find(e=>e.category==='지휘'), dup=practice&&next&&next.id===practice.id;
+  const nearest=`<section class="card next-practice">${next ? `<div class="row between"><p class="eyebrow">가장 가까운 일정</p>${tag(next)}</div><div class="next-detail">${dateTile(next.starts_at)}<div><h2>${esc(next.title)}</h2><p class="muted">${esc(dateText(next))}<br>${esc(next.place)}</p></div></div><a class="btn primary" href="#/event/${next.id}">일정 자세히 보기</a>` : emptyState('예정된 일정이 없어요')}</section>`;
   ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">${esc(s.me.name)}님, 반가워요</p><h1>오늘도, 함께 노래해요.</h1><p class="muted">우리의 다음 만남과 출석을 확인하세요.</p></section>
     ${s.missing_photos.length ? `<a class="warn notice-link" href="#/admin">사진 등록이 필요한 일정 ${s.missing_photos.length}개${badge(s.missing_photos.length)}</a>` : ''}
     ${s.missing_materials.length ? `<a class="warn notice-link" href="#/music">확인하지 않은 필수 자료 ${s.missing_materials.length}개${badge(s.missing_materials.length)}</a>` : ''}
     ${s.me.admin_role==='treasurer'&&s.finance.carry_needs_confirmation ? '<a class="warn notice-link" href="#/finance">학기 이월금을 확인해 주세요.</a>' : ''}
-    <div class="home-overview ${conductor()?'without-stats':''}"><section class="card next-practice">${next ? `<div class="row between"><p class="eyebrow">가장 가까운 일정</p>${tag(next)}</div><div class="next-detail">${dateTile(next.starts_at)}<div><h2>${esc(next.title)}</h2><p class="muted">${esc(dateText(next))}<br>${esc(next.place)}</p></div></div><a class="btn primary" href="#/event/${next.id}">일정 자세히 보기</a>` : emptyState('예정된 일정이 없어요')}</section>
+    ${practice&&!dup ? practiceCard(practice) : ''}
+    <div class="home-overview ${conductor()?'without-stats':''}">${dup ? practiceCard(practice) : nearest}
     ${!conductor()?`<section class="card attendance-summary"><p class="eyebrow">나의 출석 · ${esc(s.semester.title)}</p><p class="big">${stats.total?Math.round(stats.rate*100)+'<span>%</span>':'—'}</p><progress class="attendance-progress" max="100" value="${Math.round(stats.rate*100)}"></progress><div class="stat-breakdown"><span>출석 <b>${stats.present}</b></span><span>지각 <b>${stats.late}</b></span><span>결석 <b>${stats.absent}</b></span></div></section>`:''}</div>
     <section class="stack"><div class="row between"><h2>다가오는 일정 <span class="count-label">${events.length}</span></h2><div class="row">${conductor()?'<button class="btn small" data-write data-new-event="rehearsal">지휘 일정 등록</button>':''}${s.me.admin_role==='head'?'<button class="btn small" data-write data-new-event="admin">행정 일정 등록</button>':''}</div></div>${list(events)}</section>`;
+  ui.root.querySelectorAll('[data-quick-me]').forEach(b=>b.onclick=()=>{const v=b.dataset.quickMe; if(v===s.my_attendance[practice.id]?.status)return; v==='late'?lateSheet(practice):quickSave(practice,v);});
   bindActions();
 }
 

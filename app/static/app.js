@@ -1,5 +1,5 @@
 import { api, session, setSession, clearSession, esc, fmtDate, todayKst, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
-import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState } from './ui.js';
+import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState, describe } from './ui.js';
 import { loadOperations, getState, operationsHome, operationsCalendar, eventView, dayView, adminView } from './operations-ui.js';
 import { musicView, concertView, songView, financeView, settingsView } from './library-finance.js';
 
@@ -158,14 +158,6 @@ function statusForm(initial, locked) {
 }
 
 // ---------- 내 출석 입력 ----------
-function describe(me) {
-  if (me.status == null) return '미입력';
-  let s = STATUS[me.status] + (me.source === 'auto' ? '(자동)' : '');
-  if (me.status === 'late') s += ` · ${esc(me.reason)} · 도착 ${esc(me.eta)}`;
-  else if (me.reason) s += ` · ${esc(me.reason)}`;
-  return s;
-}
-
 async function practiceView(id) {
   if (session().role === 'conductor') { location.hash = `#/board/${id}`; return; }
   const list = getState().events;
@@ -305,6 +297,9 @@ async function boardView(id) {
               ${m.status === 'late' ? `<span class="muted">${esc(m.reason)} · 도착 ${esc(m.eta)}</span>`
                 : m.reason ? `<span class="muted">${esc(m.reason)}</span>` : ''}
             </button>
+            <div class="segment quick-status" role="group" aria-label="${esc(m.name)} 출석">
+              ${['present', 'late', 'absent'].map(v => `<button type="button" data-quick="${m.member_id}" data-status="${v}" aria-pressed="${m.status === v}" ${open ? '' : 'disabled'}>${STATUS[v]}</button>`).join('')}
+            </div>
           </li>`).join('')}</ul>
       </section>`;
     }).join('');
@@ -329,22 +324,30 @@ async function boardView(id) {
         if (confirm(`${PART[b.dataset.confirm]} 확인 완료로 표시할까요?`)) act(api('POST', `/practices/${id}/part/confirm`, { part: b.dataset.confirm }), '확인 완료');
       };
     });
-    view.querySelectorAll('[data-member]').forEach(b => {
+    const member = mid => Object.values(data.parts).flatMap(x => x.members).find(x => x.member_id === mid);
+    // 전체 폼 모달. 이름을 누르거나(사유 입력용) 줄의 '지각'을 눌렀을 때(사유·도착시간 필수) 연다.
+    function openEdit(m, status = m.status) {
+      q('#edit-name').textContent = m.name;
+      const form = statusForm({ ...m, status }, false);
+      q('#edit-form').replaceChildren(form);
+      form.onsubmit = async e => {
+        e.preventDefault();
+        const btn = form.querySelector('button');
+        if (btn) btn.disabled = true;
+        const ok = await act(api('PUT', `/practices/${id}/members/${m.member_id}`, form.read()), '저장했어요');
+        if (ok) dlg.close();
+        else if (btn) btn.disabled = false;
+      };
+      dlg.showModal();
+    }
+    view.querySelectorAll('[data-member]').forEach(b => { b.onclick = () => openEdit(member(b.dataset.member)); });
+    // 줄의 출석·결석은 한 번에 저장, 지각만 모달. 버튼이라 눌린 표시는 서버 상태에서만 오고, 실패해도 되돌릴 게 없다.
+    view.querySelectorAll('[data-quick]').forEach(b => {
       b.onclick = () => {
-        const mid = b.dataset.member;
-        const m = Object.values(data.parts).flatMap(x => x.members).find(x => x.member_id === mid);
-        q('#edit-name').textContent = m.name;
-        const form = statusForm(m, false);
-        q('#edit-form').replaceChildren(form);
-        form.onsubmit = async e => {
-          e.preventDefault();
-          const btn = form.querySelector('button');
-          if (btn) btn.disabled = true;
-          const ok = await act(api('PUT', `/practices/${id}/members/${mid}`, form.read()), '저장했어요');
-          if (ok) dlg.close();
-          else if (btn) btn.disabled = false;
-        };
-        dlg.showModal();
+        const m = member(b.dataset.quick), status = b.dataset.status;
+        if (status === m.status) return;
+        if (status === 'late') { openEdit(m, 'late'); return; }
+        act(api('PUT', `/practices/${id}/members/${m.member_id}`, { status }), `${m.name} · ${STATUS[status]}`);
       };
     });
   }
