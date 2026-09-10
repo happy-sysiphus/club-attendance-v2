@@ -12,19 +12,38 @@ export function session() {
     return s;
   } catch { return null; }
 }
+// ---------- 사용 통계 (Mixpanel) ----------
+// 공식 ES 모듈 빌드를 동적 import 한다. 정적 import 면 1.1MB 를 받는 동안 로그인 화면이
+// 안 뜨고, 예전 <script src> 2줄 방식은 stub 없이는 window.mixpanel 을 만들지 않는다.
+// 로드 전 호출은 큐에 담고, 차단되면(광고 차단기·구형 브라우저·오프라인) 조용히 버린다.
+const MIXPANEL_TOKEN = '2a63dae296de3eb701023acef425dcb8';   // 공개 토큰. 쓰기 전용이라 노출돼도 된다
+let mp = null;
+let queued = [];
+function withMixpanel(fn) {
+  if (mp) { try { fn(mp); } catch { /* 통계 실패가 앱을 막지 않는다 */ } }
+  else if (queued) queued.push(fn);
+}
+import('https://cdn.mxpnl.com/libs/mixpanel-js/dist/mixpanel.module.js').then(m => {
+  mp = m.default;
+  mp.init(MIXPANEL_TOKEN);
+  const waiting = queued;
+  queued = null;
+  waiting.forEach(fn => { try { fn(mp); } catch { /* 무시 */ } });
+}).catch(() => { queued = null; });
+
 export function setSession(s) {
   localStorage.setItem('session', JSON.stringify(s));
-  // 분석 도구가 차단·미로딩이어도 로그인은 그대로 동작해야 한다 — 실패는 조용히 무시.
-  try { window.mixpanel?.identify(s.id); window.mixpanel?.people.set({ part: s.part, role: s.role, admin_role: s.admin_role || '' }); } catch { /* 무시 */ }
+  // 이름·학번이 아니라 노션 페이지 UUID 로 식별한다. 파트·역할만 사람 속성으로.
+  withMixpanel(m => { m.identify(s.id); m.people.set({ part: s.part, role: s.role, admin_role: s.admin_role || '' }); });
 }
 export function clearSession() {
   localStorage.removeItem('session');
-  try { window.mixpanel?.reset(); } catch { /* 무시 */ }
+  withMixpanel(m => m.reset());
 }
 
 // 이름·학번·자유 텍스트(사유·비고 등)는 절대 보내지 않는다. 상태값과 경로 종류만.
 export function track(event, props) {
-  try { window.mixpanel?.track(event, props); } catch { /* 무시 */ }
+  withMixpanel(m => m.track(event, props));
 }
 
 export class ApiError extends Error {
