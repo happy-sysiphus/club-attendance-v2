@@ -1,5 +1,5 @@
 import { api, session, setSession, clearSession, track, esc, fmtDate, todayKst, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
-import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState, describe } from './ui.js';
+import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState, describe, lockCopy } from './ui.js';
 import { loadOperations, getState, operationsHome, operationsCalendar, eventView, dayView, adminView } from './operations-ui.js';
 import { musicView, concertView, songView, financeView, settingsView } from './library-finance.js';
 
@@ -165,8 +165,9 @@ async function practiceView(id) {
   if (location.hash !== `#/practice/${id}`) return;
   const p = list.find(x => x.id === id);
   if (!p || !me) throw new ApiError(404, '출석 대상 일정 없음');
-  const started = new Date() >= new Date(`${p.starts_at}+09:00`);
   const closed = p.status === 'closed';
+  const confirmed = !!p.confirmations?.[getState().me.part]; // 시작 시각이 아니라 파트 확인이 잠금 기준
+  const hint = lockCopy(getState().me);
   view.innerHTML = `
     ${backLink()}
     <section class="page-heading">
@@ -176,12 +177,12 @@ async function practiceView(id) {
     </section>
     <section class="card stack attendance-form-card">
       <div class="current-status"><p class="eyebrow">현재 출석 상태</p><p class="current ${me.status ?? ''}">${describe(me)}</p></div>
-      ${!closed && !started ? '<div class="section-heading"><h2>이번 연습, 함께할 수 있나요?</h2><p class="muted">연습 시작 전까지 변경할 수 있어요.</p></div>' : ''}
+      ${!closed && !confirmed ? `<div class="section-heading"><h2>이번 연습, 함께할 수 있나요?</h2><p class="muted">${hint.open}</p></div>` : ''}
       ${closed ? '<p class="muted">마감된 연습입니다.</p>'
-        : started ? '<p class="muted">연습이 시작돼 파트장·지휘자만 수정할 수 있어요.</p>' : ''}
+        : confirmed ? `<p class="muted">파트 확인이 끝나 여기서는 바꿀 수 없어요. ${hint.locked}</p>` : ''}
       <div id="form"></div>
     </section>`;
-  const form = statusForm(me, closed || started || getState().stale);
+  const form = statusForm(me, closed || confirmed || getState().stale);
   view.querySelector('#form').replaceWith(form);
   form.onsubmit = async e => {
     e.preventDefault();
@@ -321,7 +322,7 @@ async function boardView(id) {
     };
     view.querySelectorAll('[data-confirm]').forEach(b => {
       b.onclick = () => {
-        if (confirm(`${PART[b.dataset.confirm]} 확인 완료로 표시할까요?`)) act(api('POST', `/practices/${id}/part/confirm`, { part: b.dataset.confirm }), '확인 완료');
+        if (confirm(`${PART[b.dataset.confirm]} 확인 완료로 표시할까요?`)) act(api('POST', `/practices/${id}/part/confirm`, { part: b.dataset.confirm, seen_at: getState().loaded_at }), '확인 완료'); // 이 화면을 불러온 시각. 그 뒤 바뀐 입력이 있으면 서버가 409
       };
     });
     const member = mid => Object.values(data.parts).flatMap(x => x.members).find(x => x.member_id === mid);

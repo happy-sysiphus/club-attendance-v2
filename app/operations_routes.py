@@ -299,7 +299,7 @@ def install(app, notion, conn):
 
     @app.post("/practices/{event_id}/part/confirm")
     def part_confirm(event_id: str, body: dict = Body(...), member_id=Depends(identity)):
-        return execute(member_id, operations.confirm_part, event_id, body.get("part"))
+        return execute(member_id, operations.confirm_part, event_id, body.get("part"), body.get("seen_at"))
 
     @app.post("/practices/{event_id}/close")
     def close(event_id: str, member_id=Depends(identity)):

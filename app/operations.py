@@ -16,6 +16,14 @@ def now():
     return db.now_kst().isoformat()
 
 
+def parsed(value):
+    """now() 가 만든 KST ISO 문자열을 datetime 으로. 비었거나 형식이 다르면 None."""
+    try:
+        return datetime.fromisoformat(value).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return None
+
+
 def packed(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -423,8 +431,9 @@ class Operations:
             return self.effective(attendance, event)
         if event["status"] != "open":
             raise HTTPException(409, "마감된 일정입니다. 지휘자가 재오픈할 수 있습니다")
-        if not target_id and now() >= event["starts_at"]:
-            raise HTTPException(403, "시작 후에는 파트장·지휘자만 수정할 수 있습니다")
+        # 단원 본인 입력은 시작 시각과 무관하게, 자기 파트가 확인 완료되면 잠긴다
+        if not target_id and target["part"] in event["confirmations"]:
+            raise HTTPException(403, "파트 확인이 끝나 본인 출석을 바꿀 수 없어요")
         try:
             v = rules.validate_status_input(text(body, "status", True), text(body, "reason") or None, text(body, "eta") or None)
         except ValueError as exc:
@@ -466,11 +475,22 @@ class Operations:
         return {"practice": {**event, "notion_synced_at": event["closed_at"]}, "parts": result, "totals": totals,
                 "roster_warnings": list(self.store.roster_warnings) if me["role"] == "conductor" else []}
 
-    def confirm_part(self, data, me, event_id, part):
+    def confirm_part(self, data, me, event_id, part, seen_at=None):
         event = self.attendance_event(data, event_id)
         require(me["role"] == "conductor" or (me["role"] == "part_leader" and me["part"] == part and part != "accompanist"))
         if event["status"] != "open" or part not in self.required_parts(data):
             raise HTTPException(409, "파트를 확인할 수 없습니다")
+        # 단원이 시작 후에도 직접 입력하고 확인이 곧 잠금이다. 확인하는 사람이 현황판을 불러온(seen_at)
+        # 뒤에 그 파트 입력이 바뀌었으면, 보지 못한 입력을 잠그지 않도록 새로고침을 요구한다.
+        seen = parsed(seen_at)
+        in_part = {m["id"] for m in data["members"] if m["part"] == part}
+
+        def changed_since_seen(a):
+            t = parsed(a["updated_at"])
+            return a["event"] == event_id and a["member"] in in_part and t is not None and t > seen
+
+        if seen is None or any(changed_since_seen(a) for a in data["attendance"]):
+            raise HTTPException(409, "그 사이 출석이 바뀌었을 수 있어요. 새로고침하고 다시 확인해 주세요")
         confirmations = {**event["confirmations"], part: {"at": now(), "by": me["name"]}}
         self.store.save("events", {"confirmations": packed(confirmations)}, event_id)
         return {"confirmed": True}

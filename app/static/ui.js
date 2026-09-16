@@ -29,6 +29,13 @@ export function emptyState(title, description = '') {
   return `<div class="empty-state">${icon('calendar')}<strong>${esc(title)}</strong>${description ? `<p class="muted">${esc(description)}</p>` : ''}</div>`;
 }
 
+// 본인 출석 잠금 안내. 반주자 파트는 지휘자가 확인하고, 파트장은 잠긴 뒤에도 현황판에서 직접 고친다.
+export function lockCopy(me) {
+  if (me.part === 'accompanist') return { open: '지휘자가 확인하기 전까지 바꿀 수 있어요.', locked: '바꿀 내용은 지휘자에게 알려 주세요.' };
+  if (me.role === 'part_leader') return { open: '확인 완료를 누르기 전까지 바꿀 수 있어요.', locked: '고칠 내용은 우리 파트 현황에서 바꿀 수 있어요.' };
+  return { open: '파트장이 확인하기 전까지 바꿀 수 있어요.', locked: '바꿀 내용은 파트장에게 알려 주세요.' };
+}
+
 // 출석 상태 한 줄 요약. 내 출석 화면·홈 카드가 같이 쓴다.
 export function describe(me) {
   if (me.status == null) return '미입력';

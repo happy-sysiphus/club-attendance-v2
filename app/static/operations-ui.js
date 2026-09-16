@@ -1,5 +1,5 @@
 import {api, esc, fmtDate, todayKst, session, setSession, setReadOnly, isReadOnly, PART, STATUS} from './api.js';
-import {dateTile, emptyState, describe} from './ui.js';
+import {dateTile, emptyState, describe, lockCopy} from './ui.js';
 
 export const ui = {state: null, root: null, refresh: null, toast: null};
 export const getState = () => ui.state;
@@ -96,9 +96,12 @@ async function quickSave(practice, status) {
 
 function practiceCard(p) {
   const s=ui.state, me=s.me, mine=s.my_attendance[p.id], board=s.boards?.[p.id];
-  const started=new Date()>=new Date(`${p.starts_at}+09:00`), closed=p.status==='closed', editable=!closed&&!started;
-  const note=closed?'마감된 연습이에요.':started?'연습이 시작돼 파트장·지휘자만 수정할 수 있어요.':mine?.status?`현재 · ${describe(mine)}`:'아직 입력 전이에요. 한 번 누르면 저장돼요.';
-  const self=mine?`<div class="segment quick-status" role="group" aria-label="내 출석">${['present','late','absent'].map(v=>`<button type="button" data-quick-me="${v}" aria-pressed="${mine.status===v}" data-write ${editable?'':'disabled'}>${STATUS[v]}</button>`).join('')}</div><p class="muted">${note}</p>`:'';
+  // 본인 입력은 자기 파트 확인 전까지 열려 있다. 실제 잠금은 서버가 판단하고 여기선 버튼만 맞춘다.
+  const closed=p.status==='closed', confirmed=!!p.confirmations?.[me.part], editable=!closed&&!confirmed;
+  const note=closed?'마감된 연습이에요.':confirmed?`확인 완료 · ${describe(mine||{})}. ${lockCopy(me).locked}`:mine?.status?`현재 · ${describe(mine)}`:'아직 입력 전이에요. 한 번 누르면 저장돼요.';
+  // 시작 후 미입력은 서버가 '결석(자동)'으로 보여 준다. 아직 바꿀 수 있으면 본인이 누른 게 아니므로 눌린 표시를 하지 않고,
+  // 눌렀을 때 실제로 저장되게 한다. 잠긴 뒤에는 결과 그대로 눌린 표시.
+  const self=mine?`<div class="segment quick-status" role="group" aria-label="내 출석">${['present','late','absent'].map(v=>`<button type="button" data-quick-me="${v}" aria-pressed="${mine.status===v&&(mine.source!=='auto'||!editable)}" data-write ${editable?'':'disabled'}>${STATUS[v]}</button>`).join('')}</div><p class="muted">${note}</p>`:'';
   let summary='';
   if(board&&conductor()){
     const t=board.totals, parts=Object.values(board.parts), done=parts.filter(x=>x.confirmed).length;
@@ -122,7 +125,7 @@ export function operationsHome() {
     <div class="home-overview ${conductor()?'without-stats':''}">${dup ? practiceCard(practice) : nearest}
     ${!conductor()?`<section class="card attendance-summary"><p class="eyebrow">나의 출석 · ${esc(s.semester.title)}</p><p class="big">${stats.total?Math.round(stats.rate*100)+'<span>%</span>':'—'}</p><progress class="attendance-progress" max="100" value="${Math.round(stats.rate*100)}"></progress><div class="stat-breakdown"><span>출석 <b>${stats.present}</b></span><span>지각 <b>${stats.late}</b></span><span>결석 <b>${stats.absent}</b></span></div></section>`:''}</div>
     <section class="stack"><div class="row between"><h2>다가오는 일정 <span class="count-label">${events.length}</span></h2><div class="row">${conductor()?'<button class="btn small" data-write data-new-event="rehearsal">지휘 일정 등록</button>':''}${s.me.admin_role==='head'?'<button class="btn small" data-write data-new-event="admin">행정 일정 등록</button>':''}</div></div>${list(events)}</section>`;
-  ui.root.querySelectorAll('[data-quick-me]').forEach(b=>b.onclick=()=>{const v=b.dataset.quickMe; if(v===s.my_attendance[practice.id]?.status)return; v==='late'?lateSheet(practice):quickSave(practice,v);});
+  ui.root.querySelectorAll('[data-quick-me]').forEach(b=>b.onclick=()=>{const v=b.dataset.quickMe, cur=s.my_attendance[practice.id]; if(v===cur?.status&&cur.source!=='auto')return; v==='late'?lateSheet(practice):quickSave(practice,v);});
   bindActions();
 }
 
