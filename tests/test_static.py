@@ -1,3 +1,15 @@
+import pytest
+
+
+@pytest.mark.parametrize("path", ["/apple-touch-icon.png", "/apple-touch-icon-precomposed.png", "/favicon.ico"])
+def test_default_icon_names_serve_app_icon(client, path):
+    """페이지를 안 읽고 기본 이름으로 찾아오는 아이콘 요청이 404 대신 앱 아이콘을 받는다."""
+    r = client.get(path)
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    assert r.content == client.get("/assets/glee-icon.png").content
+
+
 def test_index_served_at_root(client):
     r = client.get("/")
     assert r.status_code == 200

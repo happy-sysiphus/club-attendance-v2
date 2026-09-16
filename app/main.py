@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config, db
@@ -31,6 +32,16 @@ def create_app(db_path: str, notion=None) -> FastAPI:
         if request.url.path == "/" or request.url.path.endswith((".js", ".css", ".html")):
             response.headers["Cache-Control"] = "no-cache"
         return response
+
+    # 페이지의 <link rel="icon"> 을 읽지 않고 기본 이름부터 찾는 요청(iOS 사파리·링크 미리보기)에도
+    # 같은 아이콘을 준다. 파일을 복제하지 않아 아이콘을 바꿔도 한 곳만 고치면 된다.
+    icon = Path(__file__).parent / "static" / "assets" / "glee-icon.png"
+
+    @app.get("/apple-touch-icon.png", include_in_schema=False)
+    @app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
+    @app.get("/favicon.ico", include_in_schema=False)
+    def default_icon():
+        return FileResponse(icon, media_type="image/png")
 
     app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
     return app
