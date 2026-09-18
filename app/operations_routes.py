@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import auth, config
-from .operations import Operations, can_photo, find, is_music, now, operation_key, packed, require, text
+from .operations import Operations, can_photo, find, has_attendance, is_music, now, operation_key, packed, require, text
 from .operations_store import NotionUnavailable, OperationsStore
 
 MIMES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".heic": "image/heic",
@@ -275,7 +275,7 @@ def install(app, notion, conn):
     @app.get("/practices")
     def practices(semester: str | None = None, member_id=Depends(identity)):
         snapshot = operations.snapshot(member_id, semester)
-        return [e for e in snapshot["events"] if e["category"] == "지휘" and e["status"] not in ("cancelled", "cancelling", "deleting")]
+        return [e for e in snapshot["events"] if has_attendance(e) and e["status"] not in ("cancelled", "cancelling", "deleting")]
 
     @app.get("/me/stats")
     def stats(semester: str | None = None, member_id=Depends(identity)):

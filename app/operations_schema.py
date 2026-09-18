@@ -29,6 +29,8 @@ SCHEMAS = {
         "photos": ("사진", "files"), "photo_meta": ("사진 업로드 기록", "rich_text"),
         "confirmations": ("파트 확인", "rich_text"),
         "created_by": ("등록자", "rich_text"), "closed_at": ("출석 마감 시각", "date"),
+        # 행정 일정만 쓴다. 지휘 일정은 항상 출석 대상이라 이 칸을 보지 않는다.
+        "takes_attendance": ("출석 받기", "checkbox"),
     }),
     "materials": ("곡별 자료", {
         "title": ("자료명", "title"), "key": ("앱 키", "rich_text"),

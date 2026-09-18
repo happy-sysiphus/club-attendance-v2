@@ -168,6 +168,7 @@ async function practiceView(id) {
   const closed = p.status === 'closed';
   const confirmed = !!p.confirmations?.[getState().me.part]; // 시작 시각이 아니라 파트 확인이 잠금 기준
   const hint = lockCopy(getState().me);
+  const noun = p.category === '지휘' ? '연습' : '일정'; // 출석 받는 행정 일정도 이 화면을 쓴다
   view.innerHTML = `
     ${backLink()}
     <section class="page-heading">
@@ -177,8 +178,8 @@ async function practiceView(id) {
     </section>
     <section class="card stack attendance-form-card">
       <div class="current-status"><p class="eyebrow">현재 출석 상태</p><p class="current ${me.status ?? ''}">${describe(me)}</p></div>
-      ${!closed && !confirmed ? `<div class="section-heading"><h2>이번 연습, 함께할 수 있나요?</h2><p class="muted">${hint.open}</p></div>` : ''}
-      ${closed ? '<p class="muted">마감된 연습입니다.</p>'
+      ${!closed && !confirmed ? `<div class="section-heading"><h2>이번 ${noun}, 함께할 수 있나요?</h2><p class="muted">${hint.open}</p></div>` : ''}
+      ${closed ? `<p class="muted">마감된 ${noun}입니다.</p>`
         : confirmed ? `<p class="muted">파트 확인이 끝나 여기서는 바꿀 수 없어요. ${hint.locked}</p>` : ''}
       <div id="form"></div>
     </section>`;

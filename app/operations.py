@@ -84,6 +84,11 @@ def cancelled(event):
     return event["status"] in ("cancelled", "cancelling", "deleting")
 
 
+def has_attendance(event):
+    """출석 대상 일정. 지휘 분류는 항상(노션에서 유형만 '행정'으로 둔 Open house 포함), 행정 분류는 '출석 받기'를 켰을 때만."""
+    return event["category"] == "지휘" or bool(event.get("takes_attendance"))
+
+
 def missing_photo(event):
     return not cancelled(event) and not event["photos"] and (event["ends_at"] or event["starts_at"])[:10] < now()[:10]
 
@@ -200,7 +205,7 @@ class Operations:
                 confirmed = {a["material"] for a in data["acknowledgements"] if a["member"] == me["id"] and a["semester"] == sid and a["confirmed_at"]}
                 missing = [m["id"] for m in required if m["id"] not in confirmed] if is_recipient(me) else []
                 stats = {"present": 0, "late": 0, "absent": 0}
-                closed = {e["id"] for e in events if e["status"] == "closed" and e["category"] == "지휘"}
+                closed = {e["id"] for e in events if e["status"] == "closed" and has_attendance(e)}
                 for a in data["attendance"]:
                     status = KO_STATUS.get(a["status"])
                     if a["event"] in closed and a["member"] == me["id"] and status:
@@ -219,7 +224,7 @@ class Operations:
                           "required_materials": [m["id"] for m in required] if is_music(me) else [],
                           "missing_materials": missing, "missing_photos": [e["id"] for e in events if missing_photo(e)] if can_photo(me) else [],
                           "stats": stats, "finance": self.finance(data, selected), "stale": False, "loaded_at": now()}
-                eligible = [e for e in events if e["category"] == "지휘" and not cancelled(e)]
+                eligible = [e for e in events if has_attendance(e) and not cancelled(e)]
                 result["boards"] = {e["id"]: self.board(data, me, e["id"]) for e in eligible} if me["role"] in ("conductor", "part_leader") else {}
                 result["my_attendance"] = {e["id"]: self.effective(next((a for a in data["attendance"] if a["member"] == me["id"] and a["event"] == e["id"]), None), e) for e in eligible} if me["role"] != "conductor" else {}
                 self.cache[(member_id, sid)] = copy.deepcopy(result)
@@ -290,6 +295,18 @@ class Operations:
                    "starts_at": start, "ends_at": end, "all_day": all_day, "place": text(body, "place"),
                    "description": text(body, "description", limit=10000), "songs": songs,
                    "song_order": packed(songs), "semester": semester["id"]}
+        if category == "행정":
+            # songs 와 같다: 키가 없는 부분 수정은 '끄기'가 아니라 '유지'다.
+            was = bool(existing and existing.get("takes_attendance"))
+            if "takes_attendance" in body and not isinstance(body["takes_attendance"], bool):
+                raise HTTPException(422, "출석 받기 값이 올바르지 않습니다")
+            takes = body["takes_attendance"] if "takes_attendance" in body else was
+            if was and not takes:
+                if any(a["event"] == event_id for a in data["attendance"]):
+                    # 끄면 기록이 앱 화면과 출석률에서 사라진다. 노션엔 남아도 아무도 모르게 되므로 막는다.
+                    raise HTTPException(409, "출석 기록이 있는 일정은 출석 받기를 끌 수 없습니다")
+                changes["confirmations"] = "{}"  # 다시 켰을 때 예전 파트 확인이 남아 단원이 잠기지 않게
+            changes["takes_attendance"] = takes
         if not existing:
             changes.update(key=operation_key(body), status="open", created_by=me["name"], confirmations="{}", photo_meta="{}")
         return {"id": self.store.save("events", changes, event_id)}
@@ -409,7 +426,7 @@ class Operations:
 
     def attendance_event(self, data, event_id):
         event = find(data["events"], event_id)
-        if event["category"] != "지휘" or cancelled(event):
+        if not has_attendance(event) or cancelled(event):
             raise HTTPException(409, "출석 대상 일정이 아닙니다")
         return event
 
