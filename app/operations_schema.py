@@ -63,5 +63,5 @@ LEDGER = {
     "direction": ("구분", "select"), "classification": ("분류", "select"),
     "amount": ("금액", "number"), "owner": ("담당자", "rich_text"),
     "note": ("비고", "rich_text"), "semester": ("학기", "relation", "semesters"),
-    "key": ("앱 키", "rich_text"),
+    "key": ("앱 키", "rich_text"), "files": ("증빙 파일", "files"),
 }

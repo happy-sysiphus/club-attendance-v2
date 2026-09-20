@@ -244,12 +244,12 @@ def install(app, notion, conn):
 
     @app.post("/api/upload/{target}/{target_id}")
     async def upload(target: str, target_id: str, request: Request, member_id=Depends(identity)):
-        if target not in ("photos", "materials"):
+        if target not in ("photos", "materials", "ledger"):
             raise HTTPException(404)
         filename = Path(unquote(request.headers.get("x-filename", ""))).name.replace("\\", "_")
         suffix = Path(filename).suffix.lower()
         kind = request.headers.get("x-material-kind", "score")
-        allowed = {".jpg", ".jpeg", ".png", ".heic"} if target == "photos" else (
+        allowed = {".jpg", ".jpeg", ".png", ".heic"} if target == "photos" else {".pdf", ".jpg", ".jpeg", ".png", ".heic"} if target == "ledger" else (
                   {".pdf", ".jpg", ".jpeg", ".png", ".heic", ".mscz"} if kind == "score" else {".mp3", ".m4a", ".wav"})
         if suffix not in allowed or kind not in ("score", "audio") or len(filename) > 150:
             raise HTTPException(422, "지원하는 파일 형식과 파일명을 확인해 주세요")
@@ -265,7 +265,7 @@ def install(app, notion, conn):
             if not size:
                 raise HTTPException(422, "빈 파일입니다")
             file.seek(0)
-            stored_name = f"{key}--{filename}" if target == "photos" else notion_name(filename)
+            stored_name = notion_name(filename) if target == "materials" else f"{key}--{filename}"
             rehearsal_date = request.headers.get("x-rehearsal-date", "")
             if target == "materials" and rehearsal_date:
                 from datetime import date
@@ -273,6 +273,18 @@ def install(app, notion, conn):
                     date.fromisoformat(rehearsal_date)
                 except ValueError:
                     raise HTTPException(422, "연습 날짜를 확인해 주세요")
+
+            def attach_to_ledger(data, me, attachment=None):
+                # 회계 항목의 증빙(영수증·이체 확인증). 1단계(attachment 없음)는 확인만, 2단계는 저장.
+                require(me["admin_role"] == "treasurer")
+                row = find(data["ledger"], target_id)
+                if any(f["name"] == stored_name for f in row["files"]):
+                    return {"ok": True}
+                if len(row["files"]) >= 20:
+                    raise HTTPException(422, "항목당 파일은 최대 20개입니다")
+                if attachment:
+                    operations.store.save("ledger", {"files": writable_files(row["files"]) + [attachment]}, target_id)
+                    return {"ok": True}
 
             def check(data, me):
                 # 잠금 안 1단계: 권한·대상·중복만 확인한다 (빠름). 바이트 전송은 잠금 밖에서 한다.
@@ -284,6 +296,8 @@ def install(app, notion, conn):
                     if len(event["photos"]) >= 100:
                         raise HTTPException(422, "일정당 사진은 최대 100장입니다")
                     return None
+                if target == "ledger":
+                    return attach_to_ledger(data, me)
                 require(me["role"] == "conductor")
                 find(data["songs"], target_id)
                 found = next((m for m in data["materials"] if m["key"] == key), None)
@@ -310,6 +324,8 @@ def install(app, notion, conn):
                     metadata[stored_name] = {"by": me["name"], "member": me["id"], "at": now()}
                     operations.store.save("events", {"photos": writable_files(remaining) + [attachment], "photo_meta": packed(metadata)}, target_id)
                     return {"ok": True}
+                if target == "ledger":
+                    return attach_to_ledger(data, me, attachment)
                 require(me["role"] == "conductor")
                 song = find(data["songs"], target_id)
                 found = next((m for m in data["materials"] if m["key"] == key), None)
@@ -328,6 +344,15 @@ def install(app, notion, conn):
     @app.put("/api/ledger/{row_id}")
     def ledger_update(row_id: str, body: dict = Body(...), member_id=Depends(identity)):
         return execute(member_id, operations.save_ledger, body, row_id)
+
+    @app.delete("/api/ledger/{row_id}/files/{filename}")
+    def ledger_file_delete(row_id: str, filename: str, member_id=Depends(identity)):
+        def removing(data, me):
+            require(me["admin_role"] == "treasurer")
+            row = find(data["ledger"], row_id)
+            operations.store.save("ledger", {"files": writable_files([f for f in row["files"] if f["name"] != filename])}, row_id)
+            return {"ok": True}
+        return execute(member_id, removing)
 
     @app.delete("/api/ledger/{row_id}")
     def ledger_delete(row_id: str, member_id=Depends(identity)):

@@ -158,7 +158,7 @@ class OperationsStore:
         ledger_id = env["ledger"] or "4379fa3860c94a498dbae5e444dd9afd"
         ledger = self._retrieve("ledger", "회계장부", ledger_id)
         additions = {}
-        for field in ("semester", "key"):
+        for field in ("semester", "key", "files"):
             label, typ, *target = LEDGER[field]
             if label not in ledger["properties"]:
                 additions[label] = {typ: {"database_id": self.ids["semesters"], "single_property": {}} if target else {}}

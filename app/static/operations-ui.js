@@ -229,12 +229,17 @@ export function songEditor(song=null,done=null){
 // 확장자로 자료 종류를 정한다 → 악보와 음원을 한 번에 섞어 올릴 수 있다.
 const MATERIAL_KINDS={pdf:'score',jpg:'score',jpeg:'score',png:'score',heic:'score',mscz:'score',mp3:'audio',m4a:'audio',wav:'audio'};
 const PHOTO_KINDS={jpg:'photo',jpeg:'photo',png:'photo',heic:'photo'};
+const UPLOADS={ // 대상별 제목·안내·허용 형식. 곡 자료만 종류·확인 필수·연습 날짜를 더 받는다.
+  photos:{title:'일정 사진 등록',hint:'JPG · PNG · HEIC',kinds:PHOTO_KINDS,accept:'.jpg,.jpeg,.png,.heic'},
+  ledger:{title:'증빙 파일 등록',hint:'영수증·이체 확인증 PDF · JPG · PNG · HEIC',kinds:{...PHOTO_KINDS,pdf:'document'},accept:'.pdf,.jpg,.jpeg,.png,.heic'},
+  materials:{title:'곡 자료 등록',hint:'악보 PDF·이미지·MuseScore(MSCZ) / 음원 MP3·M4A·WAV',kinds:MATERIAL_KINDS,accept:''},
+};
 
 export function uploadDialog(target,id,replace=''){
-  const photo=target==='photos';
+  const photo=target!=='materials',{title,hint,kinds,accept}=UPLOADS[target]; // photo: 파일만 받는 단순 업로드(사진·증빙)
   let picked=[]; // 파일마다 요청 ID를 따로 둔다. 일부만 실패해도 다시 누르면 남은 파일만 올라가고, 같은 파일이 두 번 저장되지 않는다.
   // 자료에는 accept 를 두지 않는다: 안드로이드가 모르는 확장자(.mscz)를 선택 창에서 막아 버린다. 형식은 아래 목록과 서버가 검사한다.
-  const d=dialog(photo?'일정 사진 등록':'곡 자료 등록',`<label>파일${replace?'':' (여러 개 선택 가능)'}<input name="file" type="file" required ${replace?'':'multiple'} ${photo?'accept=".jpg,.jpeg,.png,.heic"':''}></label><p class="muted">${photo?'JPG · PNG · HEIC':'악보 PDF·이미지·MuseScore(MSCZ) / 음원 MP3·M4A·WAV'} · 노션에 원본으로 저장됩니다.</p><ul class="list upload-files" hidden></ul>${!photo?input('rehearsal_date','연습 날짜 (선택)','','date'):''}`,'업로드',async(f,_,dlg)=>{
+  const d=dialog(title,`<label>파일${replace?'':' (여러 개 선택 가능)'}<input name="file" type="file" required ${replace?'':'multiple'} ${accept?`accept="${accept}"`:''}></label><p class="muted">${hint} · 노션에 원본으로 저장됩니다.</p><ul class="list upload-files" hidden></ul>${!photo?input('rehearsal_date','연습 날짜 (선택)','','date'):''}`,'업로드',async(f,_,dlg)=>{
     const bad=picked.find(p=>!p.kind);if(bad)throw new Error(`${bad.file.name}: 지원하지 않는 형식이에요`);
     const button=dlg.querySelector('[type=submit]'),failed=[];
     for(const [i,p] of picked.entries()){
@@ -249,7 +254,7 @@ export function uploadDialog(target,id,replace=''){
     ui.toast(picked.length>1?`파일 ${picked.length}개를 저장했어요`:'파일을 저장했어요');await ui.refresh();
   });
   d.querySelector('[name=file]').onchange=e=>{
-    picked=[...e.target.files].map(file=>({file,requestId:crypto.randomUUID(),kind:(photo?PHOTO_KINDS:MATERIAL_KINDS)[file.name.split('.').pop().toLowerCase()],done:false}));
+    picked=[...e.target.files].map(file=>({file,requestId:crypto.randomUUID(),kind:kinds[file.name.split('.').pop().toLowerCase()],done:false}));
     const files=d.querySelector('.upload-files');files.hidden=photo||!picked.length;
     files.innerHTML=picked.map((p,i)=>`<li class="ack-row"><span>${esc(p.file.name)} <span class="muted">${p.kind==='score'?'필기본':p.kind==='audio'?'연습 음원':''}</span></span>${p.kind?`<label class="check"><input type="checkbox" data-required="${i}" ${p.kind==='score'?'checked':''}>확인 필수</label>`:'<span class="err">지원하지 않는 형식</span>'}</li>`).join('');
   };
