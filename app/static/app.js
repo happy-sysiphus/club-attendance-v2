@@ -41,7 +41,7 @@ function renderHeader() {
 }
 document.getElementById('logout').onclick = async () => {
   try { await api('POST', '/auth/logout'); }
-  finally { clearSession(); sessionStorage.removeItem('glee-semester'); location.hash = '#/login'; }
+  finally { clearSession(); sessionStorage.removeItem('glee-semester'); changeSource?.close(); location.hash = '#/login'; }
 };
 
 // ---------- 로그인 ----------
@@ -378,12 +378,18 @@ const routes = [
 ];
 
 let generation = 0;
+let redraw = null;      // 지금 화면을 다시 그리는 함수 (실시간 갱신용)
+let staleView = false;  // 새 스냅숏은 받았는데 입력 중이라 화면을 못 갈아 끼운 상태
+// 입력 중이거나 화면 안의 창(현황판 수정 창)이 열려 있으면 다시 그리지 않는다 — 쓰던 내용이 사라진다.
+// :focus 는 창이 뒤에 있으면 안 맞는다(쓰다가 다른 앱에 다녀온 경우) → activeElement 로 본다.
+const editing = () => (view.contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) || !!view.querySelector('dialog[open]');
 
 // quick: 화면 이동(hashchange). 직전 스냅숏으로 바로 그리고, 새 스냅숏은 뒤에서 받아 내용이 달라졌을 때만 다시 그린다.
 // 그 외(첫 진입·저장 직후·새로고침·학기 변경)는 예전처럼 최신 스냅숏을 기다린다.
 async function route(quick = false) {
   if (location.hash && !location.hash.startsWith('#/')) return; // #view 같은 일반 앵커(스킵링크)는 브라우저에 맡김
   const gen = ++generation;
+  staleView = false;
   if (cleanup) { cleanup(); cleanup = null; }
   const hash = location.hash || '#/home';
   const match = routes.find(([re]) => re.test(hash));
@@ -398,6 +404,7 @@ async function route(quick = false) {
     if (gen !== generation) { if (done) done(); return; } // 그 사이 다른 화면으로 이동
     cleanup = done;
   };
+  redraw = fn === loginView ? null : show;
   let shown = false; // 직전 스냅숏으로 이미 화면을 그렸는가
   try {
     if (fn === loginView) { view.innerHTML = ''; await show(); return; }
@@ -409,13 +416,55 @@ async function route(quick = false) {
     if (gen !== generation) return;
     // 파트를 고르기 전에는 어떤 화면도 그리지 않는다. 창은 고른 뒤 route() 를 다시 돌린다.
     if (!getState().me.part) { if (!document.querySelector('.part-picker')) partPicker(); return; }
-    // 입력 중인 칸이 있으면 갈아 끼우지 않는다 — 쓰던 내용이 사라진다. 새 내용은 다음 이동·저장 때 보인다.
-    if (!instant || (changed && !view.querySelector('input:focus, textarea:focus, select:focus'))) await show();
+    if (!instant) await show(); else if (changed) await redrawWhenIdle();
+    watchChanges();
   } catch (e) {
     if (gen !== generation) return;
     if (e.status === 404) { toast('연습이 없어요', true); location.hash = '#/home'; }
     else if (e.status !== 401) { toast(e.message, true); if (!shown) failed(); } // 이미 그린 화면은 갱신 실패로 지우지 않는다
   }
 }
+
+// 입력이 끝날 때까지 기다렸다가 다시 그린다. 그 사이 다른 화면으로 가면 route() 가 staleView 를 내려 그만둔다.
+async function redrawWhenIdle() {
+  if (!editing()) { staleView = false; if (redraw) await redraw(); return; }
+  if (staleView) return; // 이미 기다리는 중
+  staleView = true;
+  const timer = setInterval(() => {
+    if (!staleView) clearInterval(timer);
+    else if (!editing()) { clearInterval(timer); staleView = false; if (redraw) redraw(); }
+  }, 1500);
+}
+
+// ---------- 실시간 반영 ----------
+// 누군가 저장하면 서버가 /api/changes(SSE)로 번호를 보낸다. 번호가 바뀌면 스냅숏을 다시 받아 달라졌을 때만 다시 그린다.
+// 첫 메시지는 기준 번호. 끊겼다 다시 붙으면(화면 잠금·터널·재배포) 그 사이 번호가 달라져 있어 놓친 저장도 따라잡는다.
+let changeSource = null, lastChange = null, refreshTimer = null;
+function watchChanges() {
+  if (changeSource && changeSource.readyState !== EventSource.CLOSED) return;
+  changeSource = new EventSource('/api/changes');
+  changeSource.onmessage = e => {
+    const known = lastChange !== null && lastChange !== e.data;
+    lastChange = e.data;
+    if (known) refreshSoon();
+  };
+}
+// ponytail: 저장 1건에 열린 화면 전부가 /api/state 를 다시 읽는다(30명 규모 전제). 0.3~1.5초로 흩고 몰린 알림은 한 번으로 합친다.
+// 단원이 크게 늘면 알림에 바뀐 일정 ID를 실어 해당 화면만 읽게 한다.
+function refreshSoon() {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(async () => {
+    refreshTimer = null;
+    if (!session() || !getState() || !redraw) return;
+    const gen = generation;
+    try {
+      const changed = await loadOperations(view, { refresh: route, toast, isCurrent: () => gen === generation });
+      if (gen === generation && changed) await redrawWhenIdle();
+    } catch { /* 조용히 넘어간다. 다음 알림이나 화면 이동 때 다시 받는다 */ }
+  }, 300 + Math.random() * 1200);
+}
+// 화면을 다시 볼 때(앱 전환·잠금 해제) 한 번 따라잡는다. 멈춰 있던 연결은 끊긴 줄 모르고 있을 수 있다.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshSoon(); });
+
 window.addEventListener('hashchange', () => route(true));
 route();

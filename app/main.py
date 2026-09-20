@@ -67,4 +67,5 @@ if __name__ == "__main__":
     # Render 같은 TLS 종료 프록시 뒤에서는 X-Forwarded-Proto/Host 를 신뢰해야
     # CSRF 출처 검사(request.base_url)와 세션 쿠키 Secure 판정(url.scheme)이 맞는다.
     uvicorn.run(create_app(config.DB_PATH, notion=notion), host="0.0.0.0",
-                port=int(os.environ.get("PORT", 8000)), proxy_headers=True, forwarded_allow_ips="*")
+                port=int(os.environ.get("PORT", 8000)), proxy_headers=True, forwarded_allow_ips="*",
+                timeout_graceful_shutdown=5)   # 열려 있는 실시간 연결(/api/changes) 때문에 재배포 종료가 늘어지지 않게

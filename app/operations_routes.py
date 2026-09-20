@@ -1,6 +1,8 @@
+import asyncio
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -28,9 +30,40 @@ def download_name(stored):
     return stored[:-4] if stored.lower().endswith(".mscz.zip") else None
 
 
+class Changes:
+    """실시간 알림. 저장이 성공할 때마다 번호를 올리고, 기다리는 SSE 연결(/api/changes)을 깨운다.
+    화면은 번호가 바뀌면 /api/state 를 다시 읽는다 — 알림에는 데이터를 싣지 않아 권한 검사를 새로 만들 필요가 없다.
+    ponytail: 프로세스 안 메모리. 단일 프로세스 전제(README 배포 설정) — worker 를 늘리면 Redis pub/sub 등으로 바꿔야 한다."""
+
+    def __init__(self):
+        self.boot, self.count, self.waiting = f"{time.time():.0f}", 0, set()   # boot: 재시작하면 번호가 0부터라 구분용
+
+    def bump(self):   # 이벤트 루프 스레드에서만 부른다 (asyncio.Event 는 스레드 안전하지 않다)
+        self.count += 1
+        for wake in self.waiting:
+            wake.set()
+
+    async def stream(self, keepalive=20):
+        wake, sent = asyncio.Event(), None
+        self.waiting.add(wake)
+        try:
+            while True:
+                wake.clear()
+                if sent != self.count:   # 첫 메시지는 기준 번호. 끊겼다 다시 붙은 화면이 그 사이 놓친 저장을 알아챈다
+                    sent = self.count
+                    yield f"data: {self.boot}:{sent}\n\n"
+                try:
+                    await asyncio.wait_for(wake.wait(), keepalive)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"   # 조용한 연결을 프록시가 끊지 않게, 끊긴 연결은 여기서 정리되게
+        finally:
+            self.waiting.discard(wake)
+
+
 def install(app, notion, conn):
     operations = Operations(OperationsStore(notion, conn)) if notion else None
     app.state.operations = operations
+    changes = app.state.changes = Changes()
 
     @app.exception_handler(NotionUnavailable)
     async def notion_error(request, exc):
@@ -46,6 +79,8 @@ def install(app, notion, conn):
         response = await call_next(request)
         if request.url.path.startswith(("/api/", "/auth/", "/practices", "/me/")):
             response.headers["Cache-Control"] = "no-store"
+            if request.method not in ("GET", "HEAD", "OPTIONS") and response.status_code < 400 and not request.url.path.startswith("/auth/"):
+                changes.bump()   # 저장 성공 → 열려 있는 모든 화면에 알린다
         return response
 
     def available():
@@ -80,6 +115,10 @@ def install(app, notion, conn):
             response.set_cookie("session", auth.sign_token(me["id"], config.SECRET_KEY), httponly=True,
                                 secure=request.url.scheme == "https", samesite="lax", max_age=60*60*24*180)
             return {k: v for k, v in me.items() if k != "student_id"}
+
+    @app.get("/api/changes")
+    async def change_stream(member_id=Depends(identity)):
+        return StreamingResponse(changes.stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
     @app.post("/auth/logout")
     def logout(response: Response):
