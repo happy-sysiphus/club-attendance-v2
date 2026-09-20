@@ -65,10 +65,17 @@ let readOnly = false;
 export function setReadOnly(value) { readOnly = Boolean(value); }
 export function isReadOnly() { return readOnly; }
 
+// 저장을 시도한 횟수. 화면이 들고 있는 스냅숏이 마지막 저장보다 오래됐는지 판단한다 (operations-ui.js showCached).
+// 응답을 못 받은 저장도 서버에는 반영됐을 수 있어, 성공 여부와 무관하게 시도만으로 센다.
+let writes = 0;
+export const writeCount = () => writes;
+export const noteWrite = () => { writes++; }; // api() 를 거치지 않는 저장(파일 업로드)용
+
 export async function api(method, path, body) {
   if (readOnly && !['GET', 'HEAD'].includes(method) && !path.startsWith('/auth/')) {
     throw new ApiError(503, '최신 정보가 아니에요. 연결을 복구한 뒤 다시 저장해 주세요.');
   }
+  if (!['GET', 'HEAD'].includes(method)) writes++;
   let res;
   try {
     res = await fetch(path, {

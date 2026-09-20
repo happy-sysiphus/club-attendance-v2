@@ -3,6 +3,8 @@
 - `glee-logo-2024.jpg`: user-provided Glee logo, copied without altering the image. Kept as the original source; no longer referenced by the app (the SVG below replaced it on screen and as the icon).
 - `glee-logo.svg`: user-provided transparent vector of the same logo (2026-09-09). Tab icon for browsers that accept SVG favicons.
 - `glee-icon.png`: `glee-logo.svg` rasterized onto a white 1024x1024 canvas (logo width 86%, shifted 3% above center). iOS ignores SVG and paints transparency black, so the home-screen icon needs this opaque PNG. Regenerate instead of editing by hand.
+- `glee-icon-192.png`, `glee-icon-512.png`: `glee-icon.png` resized (Pillow LANCZOS) for `manifest.json` (Android home-screen install).
+- `glee-icon-maskable-512.png`: `glee-icon.png` scaled to 75% (384px) centered on a white 512 canvas, so Android's circle/squircle mask (safe zone = central 80%) never clips the logo.
 - `attendance.svg`: Figma `contact_emergency`, outlined variant (`51:51972`).
 - `calendar.svg`: Figma `calendar_today`, outlined variant (`51:55562`).
 - `chevron-left.svg`: Figma top navigation back icon (`2:484`), exported from example screen `61:857`.

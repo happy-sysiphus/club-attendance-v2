@@ -1,8 +1,9 @@
-import {api, esc, fmtDate, todayKst, session, setSession, setReadOnly, isReadOnly, PART, STATUS} from './api.js';
+import {api, esc, fmtDate, todayKst, session, setSession, setReadOnly, isReadOnly, writeCount, noteWrite, PART, STATUS} from './api.js';
 import {dateTile, emptyState, describe, lockCopy} from './ui.js';
 
 export const ui = {state: null, root: null, refresh: null, toast: null};
 export const getState = () => ui.state;
+let syncedWrites = -1; // ui.state 를 받기 시작한 시점의 writeCount()
 export const conductor = () => ui.state.me.role === 'conductor';
 export const music = () => ['conductor','part_leader'].includes(ui.state.me.role) || ui.state.me.part === 'accompanist';
 export const photos = () => ['head','publicity'].includes(ui.state.me.admin_role);
@@ -16,7 +17,13 @@ export const dateText = e => `${e.all_day ? e.starts_at.slice(0,10) + ' · 종�
 export const input = (name,label,value='',type='text',required=false) => `<label>${label}<input name="${name}" type="${type}" value="${esc(value)}" ${required ? 'required' : ''}></label>`;
 const kinds = {rehearsal:'연습', regular:'정기공연', external:'외부공연', admin:'행정'};
 const adminNames = {head:'단장',publicity:'홍보',treasurer:'총무'};
-const editable = e => e.category === '지휘' ? conductor() : ui.state.me.admin_role === 'head';
+// 지휘 일정은 지휘자, 행정 일정은 단장·홍보가 등록·수정·취소·삭제한다. 서버 event_permission 과 같은 규칙.
+const adminEditor = () => ['head','publicity'].includes(ui.state.me.admin_role);
+const editable = e => e.category === '지휘' ? conductor() : adminEditor();
+// 취소·삭제는 일정에 적힌 출석까지 지운다. 기록이 있으면 몇 건이 사라지는지 먼저 알린다.
+const removalQuestion = (e, verb) => e.attendance_count
+  ? `이 일정에는 출석 기록 ${e.attendance_count}건이 있어요.\n${verb}하면 이 일정에 적힌 출석이 전부 사라져요.\n\n그래도 ${verb}할까요?`
+  : `일정을 ${verb}할까요?`;
 const danger = e => ui.state.missing_photos.includes(e.id) ? '<span class="photo-alert" title="사진 등록 필요" aria-label="사진 등록 필요">!</span>' : '';
 const tag = e => `<span class="badge ${performance(e) && !canceled(e) ? 'concert-badge' : ''}">${canceled(e) ? '취소' : esc(e.kind)}</span>`;
 const list = events => events.length ? `<ul class="list practice-list">${events.map(e => `<li><a href="#/event/${e.id}">${dateTile(e.starts_at)}<span class="practice-copy"><strong>${esc(e.title)} ${danger(e)}</strong><span class="muted">${esc(dateText(e))} · ${esc(e.place)}</span></span></a>${tag(e)}</li>`).join('')}</ul>` : emptyState('등록된 일정이 없어요');
@@ -26,14 +33,28 @@ export async function loadOperations(root, callbacks) {
   const semester = sessionStorage.getItem('glee-semester') || '';
   const fresh = sessionStorage.getItem('glee-fresh') === '1'; sessionStorage.removeItem('glee-fresh');
   const query = [semester && 'semester=' + encodeURIComponent(semester), fresh && 'fresh=1'].filter(Boolean).join('&');
-  let state;
+  let state; const seen = writeCount();
   try { state = await api('GET', `/api/state${query ? '?' + query : ''}`); }
   catch (error) {
     if (![0,503].includes(error.status) || !ui.state || ui.state.me.id !== session()?.id || (semester && ui.state.semester.id !== semester)) throw error;
     state = {...ui.state, stale:true};
   }
   if (callbacks.isCurrent && !callbacks.isCurrent()) return;
-  ui.state = state; setSession(state.me); setReadOnly(state.stale); navigation();
+  const changed = comparable(state) !== comparable(ui.state);
+  ui.state = state; syncedWrites = seen; setSession(state.me); setReadOnly(state.stale); navigation();
+  return changed;
+}
+
+// 조회 시각만 다른 스냅숏은 같은 내용이다 → 화면을 다시 그리지 않는다.
+const comparable = state => JSON.stringify({...state, loaded_at: ''});
+
+// 직전 스냅숏으로 새 화면을 바로 그려도 되는가: 같은 사람·같은 학기이고, 그 스냅숏을 받은 뒤로 저장한 게 없을 때.
+// (저장 직후에는 기다렸다가 최신 내용을 보여 준다. 지운 일정이 잠깐 다시 보이면 안 된다.)
+export function showCached() {
+  const semester = sessionStorage.getItem('glee-semester') || '';
+  if (!ui.state || ui.state.me.id !== session()?.id || !ui.state.me.part || (semester && ui.state.semester.id !== semester)
+      || syncedWrites !== writeCount()) return false;
+  navigation(); return true;
 }
 
 function navigation() {
@@ -71,7 +92,7 @@ export function dialog(title, contents, submit, onSave) {
   document.body.append(d); d.addEventListener('close',()=>d.remove());
   d.querySelector('[data-cancel]').onclick=()=>d.close();
   d.querySelector('form').onsubmit=async e=>{
-    e.preventDefault(); const b=d.querySelector('[type=submit]'), error=d.querySelector('.err');
+    e.preventDefault(); const b=d.querySelector('[type=submit]'), error=d.querySelector('p[role=alert]'); // 내용 안에도 .err 가 있을 수 있다(업로드 목록)
     if (b.disabled) return; b.disabled=true; error.hidden=true; b.textContent='노션에 저장 중…';
     try { if (isReadOnly()) throw new Error('연결을 복구하고 다시 시도해 주세요.'); await onSave(e.target.elements,requestId,d); d.close(); }
     catch(err) { error.textContent=err.message; error.hidden=false; }
@@ -124,7 +145,7 @@ export function operationsHome() {
     ${practice&&!dup ? practiceCard(practice) : ''}
     <div class="home-overview ${conductor()?'without-stats':''}">${dup ? practiceCard(practice) : nearest}
     ${!conductor()?`<section class="card attendance-summary"><p class="eyebrow">나의 출석 · ${esc(s.semester.title)}</p><p class="big">${stats.total?Math.round(stats.rate*100)+'<span>%</span>':'—'}</p><progress class="attendance-progress" max="100" value="${Math.round(stats.rate*100)}"></progress><div class="stat-breakdown"><span>출석 <b>${stats.present}</b></span><span>지각 <b>${stats.late}</b></span><span>결석 <b>${stats.absent}</b></span></div></section>`:''}</div>
-    <section class="stack"><div class="row between"><h2>다가오는 일정 <span class="count-label">${events.length}</span></h2><div class="row">${conductor()?'<button class="btn small" data-write data-new-event="rehearsal">지휘 일정 등록</button>':''}${s.me.admin_role==='head'?'<button class="btn small" data-write data-new-event="admin">행정 일정 등록</button>':''}</div></div>${list(events)}</section>`;
+    <section class="stack"><div class="row between"><h2>다가오는 일정 <span class="count-label">${events.length}</span></h2><div class="row">${conductor()?'<button class="btn small" data-write data-new-event="rehearsal">지휘 일정 등록</button>':''}${adminEditor()?'<button class="btn small" data-write data-new-event="admin">행정 일정 등록</button>':''}</div></div>${list(events)}</section>`;
   ui.root.querySelectorAll('[data-quick-me]').forEach(b=>b.onclick=()=>{const v=b.dataset.quickMe, cur=s.my_attendance[practice.id]; if(v===cur?.status&&cur.source!=='auto')return; v==='late'?lateSheet(practice):quickSave(practice,v);});
   bindActions();
 }
@@ -158,8 +179,8 @@ export function eventView(id) {
     ${performance(e)?`<section class="stack"><h2>공연 곡</h2>${songs.length?`<ol class="song-program">${songs.map(x=>`<li>${esc(x.title)} <span class="muted">${esc([x.composer,x.arranger].filter(Boolean).join(' · '))}</span></li>`).join('')}</ol>`:'<p class="muted">곡 목록이 아직 정해지지 않았어요.</p>'}${music()?`<a class="btn" href="#/concert/${id}">지휘 탭에서 자료 보기</a>`:''}</section>`:''}
     <section class="stack"><div class="row between"><h2>함께한 순간 <span class="count-label">${e.photos.length}장</span></h2>${photos()?'<button class="btn small" id="add-photo" data-write>사진 추가</button>':''}</div>${!e.photos.length?emptyState('아직 등록된 사진이 없어요',photos()?'일정당 최소 한 장을 등록해 주세요.':''):`<div class="photo-grid">${e.photos.map(f=>{const meta=e.photo_meta[f.name];return `<figure><a href="${fileURL(f)}" target="_blank" rel="noopener"><img src="${fileURL(f)}" alt="${esc(f.name.replace(/^[0-9a-f-]{36}--/,''))}" loading="lazy"></a><figcaption>${esc(meta?.by||'노션 등록')} ${esc(meta?.at?.slice(0,16).replace('T',' ')||'')}<a href="${fileURL(f)}" target="_blank" rel="noopener">원본 보기</a>${photos()?`<div class="row"><button class="text-action" data-replace-photo="${esc(f.name)}" data-write>교체</button><button class="text-action" data-delete-photo="${esc(f.name)}" data-write>삭제</button></div>`:''}</figcaption></figure>`;}).join('')}</div>`}</section>`;
   ui.root.querySelector('#edit-event')?.addEventListener('click',()=>eventEditor(e));
-  ui.root.querySelector('#cancel-event')?.addEventListener('click',()=>act('일정을 취소하고 입력된 출석을 삭제할까요?',()=>api('POST',`/api/events/${id}/cancel`)));
-  ui.root.querySelector('#delete-event')?.addEventListener('click',()=>act('일정과 출석 기록을 삭제할까요?',async()=>{await api('DELETE',`/api/events/${id}`);location.hash='#/schedule';}));
+  ui.root.querySelector('#cancel-event')?.addEventListener('click',()=>act(removalQuestion(e,'취소'),()=>api('POST',`/api/events/${id}/cancel`)));
+  ui.root.querySelector('#delete-event')?.addEventListener('click',()=>act(removalQuestion(e,'삭제'),async()=>{await api('DELETE',`/api/events/${id}`);location.hash='#/schedule';}));
   ui.root.querySelector('#add-photo')?.addEventListener('click',()=>uploadDialog('photos',id));
   ui.root.querySelectorAll('[data-delete-photo]').forEach(b=>b.onclick=()=>act('사진을 삭제할까요?',()=>api('DELETE',`/api/events/${id}/photos/${encodeURIComponent(b.dataset.deletePhoto)}`)));
   ui.root.querySelectorAll('[data-replace-photo]').forEach(b=>b.onclick=()=>uploadDialog('photos',id,b.dataset.replacePhoto));bindActions();
@@ -167,7 +188,7 @@ export function eventView(id) {
 
 export function adminView(){
   if(!photos()){ui.root.innerHTML=emptyState('행정 탭 접근 권한이 없어요');return;}
-  ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">ADMINISTRATION</p><h1>일정과 사진 기록</h1><p class="muted">빨간 느낌표가 있는 일정에 사진을 등록해 주세요.</p></section>${ui.state.me.admin_role==='head'?'<button class="btn" data-write data-new-event="admin">행정 일정 등록</button>':''}${list([...ui.state.events].sort((a,b)=>b.starts_at.localeCompare(a.starts_at)))}`;bindActions();
+  ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">ADMINISTRATION</p><h1>일정과 사진 기록</h1><p class="muted">빨간 느낌표가 있는 일정에 사진을 등록해 주세요.</p></section>${adminEditor()?'<button class="btn" data-write data-new-event="admin">행정 일정 등록</button>':''}${list([...ui.state.events].sort((a,b)=>b.starts_at.localeCompare(a.starts_at)))}`;bindActions();
 }
 
 export function eventEditor(event=null,defaultKind='rehearsal') {
@@ -205,11 +226,31 @@ export function songEditor(song=null,done=null){
   });
 }
 
+// 확장자로 자료 종류를 정한다 → 악보와 음원을 한 번에 섞어 올릴 수 있다.
+const MATERIAL_KINDS={pdf:'score',jpg:'score',jpeg:'score',png:'score',heic:'score',mscz:'score',mp3:'audio',m4a:'audio',wav:'audio'};
+const PHOTO_KINDS={jpg:'photo',jpeg:'photo',png:'photo',heic:'photo'};
+
 export function uploadDialog(target,id,replace=''){
   const photo=target==='photos';
-  const d=dialog(photo?'일정 사진 등록':'곡 자료 등록',`${!photo?'<label>자료 종류<select name="kind"><option value="score">악보 필기본</option><option value="audio">연습 음원</option></select></label>':''}<label>파일<input name="file" type="file" required accept="${photo?'.jpg,.jpeg,.png,.heic':'.pdf,.jpg,.jpeg,.png,.heic'}"></label><p class="muted">${photo?'JPG · PNG · HEIC':'악보 PDF·이미지 / 음원 MP3·M4A·WAV'} · 노션에 원본으로 저장됩니다.</p>${!photo?`${input('rehearsal_date','연습 날짜 (선택)','','date')}<label class="check"><input name="required" type="checkbox" checked>확인 필수</label>`:''}`,'업로드',async(f,requestId)=>{
-    const file=f.file.files[0];const res=await fetch(`/api/upload/${target}/${id}`,{method:'POST',credentials:'same-origin',body:file,headers:{'Content-Type':'application/octet-stream','X-Filename':encodeURIComponent(file.name),'X-Request-Id':requestId,...(replace?{'X-Replace-Photo':encodeURIComponent(replace)}:{}),...(!photo?{'X-Material-Kind':f.kind.value,'X-Required':String(f.required.checked),'X-Rehearsal-Date':f.rehearsal_date.value}:{})}});
-    if(!res.ok){const error=await res.json();throw new Error(error.detail||'업로드에 실패했어요');}ui.toast('파일을 저장했어요');await ui.refresh();
+  let picked=[]; // 파일마다 요청 ID를 따로 둔다. 일부만 실패해도 다시 누르면 남은 파일만 올라가고, 같은 파일이 두 번 저장되지 않는다.
+  // 자료에는 accept 를 두지 않는다: 안드로이드가 모르는 확장자(.mscz)를 선택 창에서 막아 버린다. 형식은 아래 목록과 서버가 검사한다.
+  const d=dialog(photo?'일정 사진 등록':'곡 자료 등록',`<label>파일${replace?'':' (여러 개 선택 가능)'}<input name="file" type="file" required ${replace?'':'multiple'} ${photo?'accept=".jpg,.jpeg,.png,.heic"':''}></label><p class="muted">${photo?'JPG · PNG · HEIC':'악보 PDF·이미지·MuseScore(MSCZ) / 음원 MP3·M4A·WAV'} · 노션에 원본으로 저장됩니다.</p><ul class="list upload-files" hidden></ul>${!photo?input('rehearsal_date','연습 날짜 (선택)','','date'):''}`,'업로드',async(f,_,dlg)=>{
+    const bad=picked.find(p=>!p.kind);if(bad)throw new Error(`${bad.file.name}: 지원하지 않는 형식이에요`);
+    const button=dlg.querySelector('[type=submit]'),failed=[];
+    for(const [i,p] of picked.entries()){
+      if(p.done)continue;
+      button.textContent=`노션에 저장 중… ${i+1}/${picked.length}`;noteWrite();
+      const res=await fetch(`/api/upload/${target}/${id}`,{method:'POST',credentials:'same-origin',body:p.file,headers:{'Content-Type':'application/octet-stream','X-Filename':encodeURIComponent(p.file.name),'X-Request-Id':p.requestId,...(replace?{'X-Replace-Photo':encodeURIComponent(replace)}:{}),...(!photo?{'X-Material-Kind':p.kind,'X-Required':String(dlg.querySelector(`[data-required="${i}"]`).checked),'X-Rehearsal-Date':f.rehearsal_date.value}:{})}}).catch(()=>null);
+      // 하나가 실패해도 나머지는 계속 올린다. 용량 초과처럼 매번 실패하는 파일이 뒤 파일을 막지 않게.
+      if(!res?.ok){failed.push(`${p.file.name}: ${(await res?.json().catch(()=>({})))?.detail||'업로드에 실패했어요'}`);continue;}
+      p.done=true;
+    }
+    if(failed.length){const saved=picked.filter(x=>x.done).length;if(saved)ui.refresh();throw new Error(`${failed.join(' / ')}${saved?` · 나머지 ${saved}개는 저장됐어요. 다시 누르면 실패한 파일만 올려요.`:''}`);}
+    ui.toast(picked.length>1?`파일 ${picked.length}개를 저장했어요`:'파일을 저장했어요');await ui.refresh();
   });
-  if(!photo)d.querySelector('[name=kind]').onchange=e=>{const score=e.target.value==='score';d.querySelector('[name=required]').checked=score;d.querySelector('[name=file]').accept=score?'.pdf,.jpg,.jpeg,.png,.heic':'.mp3,.m4a,.wav';};
+  d.querySelector('[name=file]').onchange=e=>{
+    picked=[...e.target.files].map(file=>({file,requestId:crypto.randomUUID(),kind:(photo?PHOTO_KINDS:MATERIAL_KINDS)[file.name.split('.').pop().toLowerCase()],done:false}));
+    const files=d.querySelector('.upload-files');files.hidden=photo||!picked.length;
+    files.innerHTML=picked.map((p,i)=>`<li class="ack-row"><span>${esc(p.file.name)} <span class="muted">${p.kind==='score'?'필기본':p.kind==='audio'?'연습 음원':''}</span></span>${p.kind?`<label class="check"><input type="checkbox" data-required="${i}" ${p.kind==='score'?'checked':''}>확인 필수</label>`:'<span class="err">지원하지 않는 형식</span>'}</li>`).join('');
+  };
 }

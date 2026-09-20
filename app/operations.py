@@ -1,6 +1,7 @@
 """Role-aware operations service. All successful writes have reached Notion."""
 import copy
 import json
+from collections import Counter
 from datetime import datetime
 from uuid import UUID
 
@@ -201,6 +202,10 @@ class Operations:
                 selected = self.selected(data, semester)
                 sid = selected["id"]
                 events = [e for e in data["events"] if e["semester"] == sid and e["status"] != "deleting"]
+                # 취소·삭제는 일정에 연결된 출석 행을 전부 지운다. 화면이 지우기 전에 몇 건인지 경고할 수 있게 건수를 준다.
+                rows_per_event = Counter(a["event"] for a in data["attendance"])
+                for e in events:
+                    e["attendance_count"] = rows_per_event[e["id"]]
                 required = self.wanted_materials(data, sid)
                 confirmed = {a["material"] for a in data["acknowledgements"] if a["member"] == me["id"] and a["semester"] == sid and a["confirmed_at"]}
                 missing = [m["id"] for m in required if m["id"] not in confirmed] if is_recipient(me) else []
@@ -250,7 +255,11 @@ class Operations:
         return {"part": part}
 
     def event_permission(self, me, event):
-        require(me["role"] == "conductor" if event["category"] == "지휘" else me["admin_role"] == "head")
+        # 지휘 일정은 지휘자, 행정 일정은 단장·홍보가 등록·수정·취소·삭제한다.
+        # 취소·삭제는 출석 기록까지 지운다 → 화면이 attendance_count 로 경고한 뒤 요청한다.
+        if event["category"] == "지휘":
+            return require(me["role"] == "conductor")
+        require(me["admin_role"] in ("head", "publicity"), "행정 일정은 단장·홍보가 관리할 수 있어요")
 
     def save_event(self, data, me, body, event_id=None):
         existing = find(data["events"], event_id) if event_id else None

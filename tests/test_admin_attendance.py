@@ -168,4 +168,6 @@ def test_closed_open_house_survives_in_stats_attendance_and_board():
     assert member["stats"]["present"] == 1 and member["stats"]["total"] == 1
     assert "oh" in member["my_attendance"]
     assert "oh" in ops.snapshot("c")["boards"]
+    # 취소·삭제 경고에 쓰는 건수. 일정에 연결된 출석 행 전부를 센다(지울 때 전부 지워지므로).
+    assert member["events"][0]["attendance_count"] == 1
     assert store.saved == []

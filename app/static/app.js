@@ -1,6 +1,6 @@
 import { api, session, setSession, clearSession, track, esc, fmtDate, todayKst, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
 import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState, describe, lockCopy } from './ui.js';
-import { loadOperations, getState, operationsHome, operationsCalendar, eventView, dayView, adminView } from './operations-ui.js';
+import { loadOperations, showCached, getState, operationsHome, operationsCalendar, eventView, dayView, adminView } from './operations-ui.js';
 import { musicView, concertView, songView, financeView, settingsView } from './library-finance.js';
 
 const view = document.getElementById('view');
@@ -217,6 +217,7 @@ async function boardView(id) {
   const dlg = view.querySelector('#edit');
   view.querySelector('#edit-cancel').onclick = () => dlg.close();
   let data;
+  let seenAt = ''; // data 를 받은 스냅숏의 조회 시각. 화면을 안 갈아 끼우고 ui.state 만 새로워질 수 있어 data 와 같이 잡아 둔다
   let busy = false;
   let lastList = '';
   let alive = true;
@@ -226,7 +227,7 @@ async function boardView(id) {
     if (!view.querySelector('#board-list')) return; // 뷰가 이미 교체됨
     busy = true;
     try {
-      data = getState().boards[id];
+      data = getState().boards[id]; seenAt = getState().loaded_at;
       if (!data) throw new ApiError(404, '출석 대상 일정 없음');
     }
     catch (e) {
@@ -246,7 +247,7 @@ async function boardView(id) {
       toast(mp ? `${mp.map(k => PART[k]).join('·')} 확인이 필요해요` : e.message, true);
     }
     try { await loadOperations(view, { refresh: route, toast }); } catch (e) { toast(e.message, true); }
-    load();
+    if (alive) load(); else route(true); // 저장하는 사이 뒤에서 온 스냅숏이 화면을 새로 그렸으면 이 인스턴스는 죽어 있다
     return ok;
   }
 
@@ -323,7 +324,7 @@ async function boardView(id) {
     };
     view.querySelectorAll('[data-confirm]').forEach(b => {
       b.onclick = () => {
-        if (confirm(`${PART[b.dataset.confirm]} 확인 완료로 표시할까요?`)) act(api('POST', `/practices/${id}/part/confirm`, { part: b.dataset.confirm, seen_at: getState().loaded_at }), '확인 완료'); // 이 화면을 불러온 시각. 그 뒤 바뀐 입력이 있으면 서버가 409
+        if (confirm(`${PART[b.dataset.confirm]} 확인 완료로 표시할까요?`)) act(api('POST', `/practices/${id}/part/confirm`, { part: b.dataset.confirm, seen_at: seenAt }), '확인 완료'); // 이 화면에 그린 데이터의 조회 시각. 그 뒤 바뀐 입력이 있으면 서버가 409
       };
     });
     const member = mid => Object.values(data.parts).flatMap(x => x.members).find(x => x.member_id === mid);
@@ -378,7 +379,9 @@ const routes = [
 
 let generation = 0;
 
-async function route() {
+// quick: 화면 이동(hashchange). 직전 스냅숏으로 바로 그리고, 새 스냅숏은 뒤에서 받아 내용이 달라졌을 때만 다시 그린다.
+// 그 외(첫 진입·저장 직후·새로고침·학기 변경)는 예전처럼 최신 스냅숏을 기다린다.
+async function route(quick = false) {
   if (location.hash && !location.hash.startsWith('#/')) return; // #view 같은 일반 앵커(스킵링크)는 브라우저에 맡김
   const gen = ++generation;
   if (cleanup) { cleanup(); cleanup = null; }
@@ -389,22 +392,30 @@ async function route() {
   if (fn !== loginView && !session()) { location.hash = '#/login'; return; }
   track('page_view', { route: hash.split('/')[1] || 'home' });
   renderHeader();
-  view.innerHTML = '<p class="muted">불러오는 중…</p>';
-  try {
-    if (fn !== loginView) {
-      await loadOperations(view, { refresh: route, toast, isCurrent: () => gen === generation });
-      if (gen !== generation) return;
-      // 파트를 고르기 전에는 어떤 화면도 그리지 않는다. 창은 고른 뒤 route() 를 다시 돌린다.
-      if (!getState().me.part) { if (!document.querySelector('.part-picker')) partPicker(); return; }
-    }
+  const show = async () => {
+    if (cleanup) { cleanup(); cleanup = null; } // 같은 화면을 두 번 그릴 수 있다 (즉시 + 갱신)
     const done = (await fn(...hash.match(re).slice(1))) || null;
     if (gen !== generation) { if (done) done(); return; } // 그 사이 다른 화면으로 이동
     cleanup = done;
+  };
+  let shown = false; // 직전 스냅숏으로 이미 화면을 그렸는가
+  try {
+    if (fn === loginView) { view.innerHTML = ''; await show(); return; }
+    const loading = loadOperations(view, { refresh: route, toast, isCurrent: () => gen === generation });
+    loading.catch(() => {}); // 즉시 그리기가 먼저 실패해도 '처리 안 된 거부' 경고가 남지 않게. 아래 await 가 같은 오류를 다시 받는다.
+    const instant = quick === true && showCached();
+    if (instant) { await show(); shown = true; } else view.innerHTML = '<p class="muted">불러오는 중…</p>';
+    const changed = await loading;
+    if (gen !== generation) return;
+    // 파트를 고르기 전에는 어떤 화면도 그리지 않는다. 창은 고른 뒤 route() 를 다시 돌린다.
+    if (!getState().me.part) { if (!document.querySelector('.part-picker')) partPicker(); return; }
+    // 입력 중인 칸이 있으면 갈아 끼우지 않는다 — 쓰던 내용이 사라진다. 새 내용은 다음 이동·저장 때 보인다.
+    if (!instant || (changed && !view.querySelector('input:focus, textarea:focus, select:focus'))) await show();
   } catch (e) {
     if (gen !== generation) return;
     if (e.status === 404) { toast('연습이 없어요', true); location.hash = '#/home'; }
-    else if (e.status !== 401) { toast(e.message, true); failed(); }
+    else if (e.status !== 401) { toast(e.message, true); if (!shown) failed(); } // 이미 그린 화면은 갱신 실패로 지우지 않는다
   }
 }
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => route(true));
 route();

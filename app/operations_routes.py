@@ -2,10 +2,11 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
+import httpx
 from fastapi import Body, Depends, HTTPException, Request, Response
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import auth, config
@@ -13,7 +14,18 @@ from .operations import Operations, can_photo, find, has_attendance, is_music, n
 from .operations_store import NotionUnavailable, OperationsStore
 
 MIMES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".heic": "image/heic",
-         ".pdf": "application/pdf", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav"}
+         ".pdf": "application/pdf", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav",
+         ".mscz": "application/zip"}
+
+
+def notion_name(filename):
+    """노션 파일 업로드는 .mscz 확장자를 400 으로 거절한다(2026-09-20 실측). mscz 는 실제로 zip 이라
+    '.zip' 을 덧붙여 저장하고, 열 때 download_name 으로 원래 이름을 돌려준다."""
+    return filename + ".zip" if filename.lower().endswith(".mscz") else filename
+
+
+def download_name(stored):
+    return stored[:-4] if stored.lower().endswith(".mscz.zip") else None
 
 
 def install(app, notion, conn):
@@ -154,8 +166,31 @@ def install(app, notion, conn):
             url = f.get(f.get("type"), {}).get("url", "")
             if not url.startswith("https://"):
                 raise HTTPException(409, "파일 URL을 다시 불러와 주세요")
+            # 서버가 대신 받아 주는 건 노션이 보관한 파일뿐이다. 노션에서 손으로 넣은 외부 링크는 예전처럼 브라우저가 직접 연다.
+            return url, download_name(f.get("name", "")) if f.get("type") == "file" else None
+        url, name = execute(member_id, opening)
+        if not name:
             return RedirectResponse(url, status_code=303)
-        return execute(member_id, opening)
+        # .zip 으로 저장한 MuseScore 파일: 잠금 밖에서 받아 원래 이름(.mscz)으로 내려준다.
+        upstream = httpx.Client(timeout=120)   # 리다이렉트는 따라가지 않는다 (서명된 URL 은 바로 200)
+        try:
+            source = upstream.send(upstream.build_request("GET", url), stream=True)
+        except httpx.HTTPError:
+            upstream.close()
+            raise HTTPException(502, "노션에서 파일을 받지 못했어요. 잠시 후 다시 시도해 주세요")
+        if source.status_code != 200:
+            source.close()
+            upstream.close()
+            raise HTTPException(502, "노션에서 파일을 받지 못했어요. 잠시 후 다시 시도해 주세요")
+
+        def body():
+            try:
+                yield from source.iter_bytes()
+            finally:
+                source.close()
+                upstream.close()
+        return StreamingResponse(body(), media_type="application/x-musescore",
+                                 headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
     @app.delete("/api/events/{event_id}/photos/{filename}")
     def photo_delete(event_id: str, filename: str, member_id=Depends(identity)):
@@ -176,7 +211,7 @@ def install(app, notion, conn):
         suffix = Path(filename).suffix.lower()
         kind = request.headers.get("x-material-kind", "score")
         allowed = {".jpg", ".jpeg", ".png", ".heic"} if target == "photos" else (
-                  {".pdf", ".jpg", ".jpeg", ".png", ".heic"} if kind == "score" else {".mp3", ".m4a", ".wav"})
+                  {".pdf", ".jpg", ".jpeg", ".png", ".heic", ".mscz"} if kind == "score" else {".mp3", ".m4a", ".wav"})
         if suffix not in allowed or kind not in ("score", "audio") or len(filename) > 150:
             raise HTTPException(422, "지원하는 파일 형식과 파일명을 확인해 주세요")
         key = operation_key({"request_id": request.headers.get("x-request-id", "")})
@@ -191,7 +226,7 @@ def install(app, notion, conn):
             if not size:
                 raise HTTPException(422, "빈 파일입니다")
             file.seek(0)
-            stored_name = f"{key}--{filename}" if target == "photos" else filename
+            stored_name = f"{key}--{filename}" if target == "photos" else notion_name(filename)
             rehearsal_date = request.headers.get("x-rehearsal-date", "")
             if target == "materials" and rehearsal_date:
                 from datetime import date
