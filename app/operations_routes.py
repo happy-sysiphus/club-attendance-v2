@@ -1,8 +1,10 @@
 import asyncio
 import logging
 import os
+import shutil
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -13,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import auth, config
 from .operations import Operations, can_photo, find, has_attendance, is_music, now, operation_key, packed, require, text
-from .operations_store import NotionUnavailable, OperationsStore
+from .operations_store import NotionUnavailable, OperationsStore, UnsupportedFileType
 
 MIMES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".heic": "image/heic",
          ".pdf": "application/pdf", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav",
@@ -24,6 +26,17 @@ def notion_name(filename):
     """노션 파일 업로드는 .mscz 확장자를 400 으로 거절한다(2026-09-20 실측). mscz 는 실제로 zip 이라
     '.zip' 을 덧붙여 저장하고, 열 때 download_name 으로 원래 이름을 돌려준다."""
     return filename + ".zip" if filename.lower().endswith(".mscz") else filename
+
+
+def zipped(file, name):
+    """노션이 받지 않는 형식은 zip 으로 묶어 저장한다. (새 임시 파일, 크기) 를 돌려준다."""
+    file.seek(0)
+    out = tempfile.SpooledTemporaryFile(max_size=5 * 1024 * 1024)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive, archive.open(name, "w", force_zip64=True) as member:
+        shutil.copyfileobj(file, member)
+    size = out.tell()
+    out.seek(0)
+    return out, size
 
 
 def download_name(stored):
@@ -249,9 +262,10 @@ def install(app, notion, conn):
         filename = Path(unquote(request.headers.get("x-filename", ""))).name.replace("\\", "_")
         suffix = Path(filename).suffix.lower()
         kind = request.headers.get("x-material-kind", "score")
-        allowed = {".jpg", ".jpeg", ".png", ".heic"} if target == "photos" else {".pdf", ".jpg", ".jpeg", ".png", ".heic"} if target == "ledger" else (
+        # 회계 증빙(ledger)은 형식 제한이 없다. 노션이 받지 않는 형식은 아래에서 zip 으로 묶는다.
+        allowed = {".jpg", ".jpeg", ".png", ".heic"} if target == "photos" else None if target == "ledger" else (
                   {".pdf", ".jpg", ".jpeg", ".png", ".heic", ".mscz"} if kind == "score" else {".mp3", ".m4a", ".wav"})
-        if suffix not in allowed or kind not in ("score", "audio") or len(filename) > 150:
+        if not filename or (allowed is not None and suffix not in allowed) or kind not in ("score", "audio") or len(filename) > 150:
             raise HTTPException(422, "지원하는 파일 형식과 파일명을 확인해 주세요")
         key = operation_key({"request_id": request.headers.get("x-request-id", "")})
         limit = int(os.environ.get("MAX_UPLOAD_MB", "200")) * 1024 * 1024
@@ -278,7 +292,7 @@ def install(app, notion, conn):
                 # 회계 항목의 증빙(영수증·이체 확인증). 1단계(attachment 없음)는 확인만, 2단계는 저장.
                 require(me["admin_role"] == "treasurer")
                 row = find(data["ledger"], target_id)
-                if any(f["name"] == stored_name for f in row["files"]):
+                if any(f["name"].startswith(f"{key}--") for f in row["files"]):   # zip 으로 바뀌어 저장됐어도 같은 요청이다
                     return {"ok": True}
                 if len(row["files"]) >= 20:
                     raise HTTPException(422, "항목당 파일은 최대 20개입니다")
@@ -307,7 +321,15 @@ def install(app, notion, conn):
             if done:
                 return done
             # 잠금 밖: 대용량 전송(수 초~수 분) 동안 다른 단원의 출석 입력·조회가 막히지 않는다.
-            attachment = await run_in_threadpool(operations.store.upload, file, stored_name, MIMES[suffix], size)
+            try:
+                attachment = await run_in_threadpool(operations.store.upload, file, stored_name,
+                                                     None if target == "ledger" else MIMES[suffix], size)
+            except UnsupportedFileType:
+                if target != "ledger":
+                    raise HTTPException(422, "노션이 받지 않는 파일 형식입니다")
+                bundle, bundle_size = await run_in_threadpool(zipped, file, filename)
+                with bundle:
+                    attachment = await run_in_threadpool(operations.store.upload, bundle, stored_name + ".zip", "application/zip", bundle_size)
 
             def persist(data, me):
                 # 잠금 안 2단계: 최신 상태를 다시 읽어 중복·권한을 재확인한 뒤 속성만 저장한다 (0.35초).

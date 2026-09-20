@@ -229,32 +229,42 @@ export function songEditor(song=null,done=null){
 // 확장자로 자료 종류를 정한다 → 악보와 음원을 한 번에 섞어 올릴 수 있다.
 const MATERIAL_KINDS={pdf:'score',jpg:'score',jpeg:'score',png:'score',heic:'score',mscz:'score',mp3:'audio',m4a:'audio',wav:'audio'};
 const PHOTO_KINDS={jpg:'photo',jpeg:'photo',png:'photo',heic:'photo'};
+export const LEDGER_FILE_HINT='영수증·이체 확인증 등 모든 형식. 노션이 받지 않는 형식(HWP 등)은 zip으로 묶어 저장해요';
 const UPLOADS={ // 대상별 제목·안내·허용 형식. 곡 자료만 종류·확인 필수·연습 날짜를 더 받는다.
   photos:{title:'일정 사진 등록',hint:'JPG · PNG · HEIC',kinds:PHOTO_KINDS,accept:'.jpg,.jpeg,.png,.heic'},
-  ledger:{title:'증빙 파일 등록',hint:'영수증·이체 확인증 PDF · JPG · PNG · HEIC',kinds:{...PHOTO_KINDS,pdf:'document'},accept:'.pdf,.jpg,.jpeg,.png,.heic'},
+  ledger:{title:'증빙 파일 등록',hint:LEDGER_FILE_HINT,kinds:null,accept:''},
   materials:{title:'곡 자료 등록',hint:'악보 PDF·이미지·MuseScore(MSCZ) / 음원 MP3·M4A·WAV',kinds:MATERIAL_KINDS,accept:''},
 };
 
+// 고른 파일 목록. 파일마다 요청 ID를 따로 둔다: 일부만 실패해도 다시 누르면 남은 파일만 올라가고, 같은 파일이 두 번 저장되지 않는다.
+export const pickedFiles=(files,kinds)=>[...files].map(file=>({file,requestId:crypto.randomUUID(),kind:kinds?.[file.name.split('.').pop().toLowerCase()],done:false}));
+
+// 하나가 실패해도 나머지는 계속 올린다(용량 초과처럼 매번 실패하는 파일이 뒤 파일을 막지 않게). 실패가 있으면 끝에 한 번에 알린다.
+export async function sendFiles(target,id,picked,dlg,headersFor=()=>({}),savedAlready=false){
+  const button=dlg.querySelector('[type=submit]'),failed=[];
+  for(const [i,p] of picked.entries()){
+    if(p.done)continue;
+    button.textContent=`노션에 저장 중… ${i+1}/${picked.length}`;noteWrite();
+    const res=await fetch(`/api/upload/${target}/${id}`,{method:'POST',credentials:'same-origin',body:p.file,headers:{'Content-Type':'application/octet-stream','X-Filename':encodeURIComponent(p.file.name),'X-Request-Id':p.requestId,...headersFor(p,i)}}).catch(()=>null);
+    if(!res?.ok){failed.push(`${p.file.name}: ${(await res?.json().catch(()=>({})))?.detail||'업로드에 실패했어요'}`);continue;}
+    p.done=true;
+  }
+  if(!failed.length)return;
+  const saved=picked.filter(x=>x.done).length;if(saved||savedAlready)ui.refresh();
+  throw new Error(`${failed.join(' / ')}${saved||savedAlready?` · ${savedAlready?'항목':`나머지 ${saved}개`}은 저장됐어요. 다시 누르면 실패한 파일만 올려요.`:''}`);
+}
+
 export function uploadDialog(target,id,replace=''){
   const photo=target!=='materials',{title,hint,kinds,accept}=UPLOADS[target]; // photo: 파일만 받는 단순 업로드(사진·증빙)
-  let picked=[]; // 파일마다 요청 ID를 따로 둔다. 일부만 실패해도 다시 누르면 남은 파일만 올라가고, 같은 파일이 두 번 저장되지 않는다.
+  let picked=[];
   // 자료에는 accept 를 두지 않는다: 안드로이드가 모르는 확장자(.mscz)를 선택 창에서 막아 버린다. 형식은 아래 목록과 서버가 검사한다.
   const d=dialog(title,`<label>파일${replace?'':' (여러 개 선택 가능)'}<input name="file" type="file" required ${replace?'':'multiple'} ${accept?`accept="${accept}"`:''}></label><p class="muted">${hint} · 노션에 원본으로 저장됩니다.</p><ul class="list upload-files" hidden></ul>${!photo?input('rehearsal_date','연습 날짜 (선택)','','date'):''}`,'업로드',async(f,_,dlg)=>{
-    const bad=picked.find(p=>!p.kind);if(bad)throw new Error(`${bad.file.name}: 지원하지 않는 형식이에요`);
-    const button=dlg.querySelector('[type=submit]'),failed=[];
-    for(const [i,p] of picked.entries()){
-      if(p.done)continue;
-      button.textContent=`노션에 저장 중… ${i+1}/${picked.length}`;noteWrite();
-      const res=await fetch(`/api/upload/${target}/${id}`,{method:'POST',credentials:'same-origin',body:p.file,headers:{'Content-Type':'application/octet-stream','X-Filename':encodeURIComponent(p.file.name),'X-Request-Id':p.requestId,...(replace?{'X-Replace-Photo':encodeURIComponent(replace)}:{}),...(!photo?{'X-Material-Kind':p.kind,'X-Required':String(dlg.querySelector(`[data-required="${i}"]`).checked),'X-Rehearsal-Date':f.rehearsal_date.value}:{})}}).catch(()=>null);
-      // 하나가 실패해도 나머지는 계속 올린다. 용량 초과처럼 매번 실패하는 파일이 뒤 파일을 막지 않게.
-      if(!res?.ok){failed.push(`${p.file.name}: ${(await res?.json().catch(()=>({})))?.detail||'업로드에 실패했어요'}`);continue;}
-      p.done=true;
-    }
-    if(failed.length){const saved=picked.filter(x=>x.done).length;if(saved)ui.refresh();throw new Error(`${failed.join(' / ')}${saved?` · 나머지 ${saved}개는 저장됐어요. 다시 누르면 실패한 파일만 올려요.`:''}`);}
+    const bad=kinds&&picked.find(p=>!p.kind);if(bad)throw new Error(`${bad.file.name}: 지원하지 않는 형식이에요`);
+    await sendFiles(target,id,picked,dlg,(p,i)=>({...(replace?{'X-Replace-Photo':encodeURIComponent(replace)}:{}),...(!photo?{'X-Material-Kind':p.kind,'X-Required':String(dlg.querySelector(`[data-required="${i}"]`).checked),'X-Rehearsal-Date':f.rehearsal_date.value}:{})}));
     ui.toast(picked.length>1?`파일 ${picked.length}개를 저장했어요`:'파일을 저장했어요');await ui.refresh();
   });
   d.querySelector('[name=file]').onchange=e=>{
-    picked=[...e.target.files].map(file=>({file,requestId:crypto.randomUUID(),kind:kinds[file.name.split('.').pop().toLowerCase()],done:false}));
+    picked=pickedFiles(e.target.files,kinds);
     const files=d.querySelector('.upload-files');files.hidden=photo||!picked.length;
     files.innerHTML=picked.map((p,i)=>`<li class="ack-row"><span>${esc(p.file.name)} <span class="muted">${p.kind==='score'?'필기본':p.kind==='audio'?'연습 음원':''}</span></span>${p.kind?`<label class="check"><input type="checkbox" data-required="${i}" ${p.kind==='score'?'checked':''}>확인 필수</label>`:'<span class="err">지원하지 않는 형식</span>'}</li>`).join('');
   };

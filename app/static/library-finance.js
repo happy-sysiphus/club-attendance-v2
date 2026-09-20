@@ -1,6 +1,6 @@
 import {api,esc,todayKst,PART} from './api.js';
 import {emptyState} from './ui.js';
-import {ui,conductor,music,canceled,performance,back,badge,money,dateText,input,bindActions,act,dialog,eventEditor,songEditor,uploadDialog,fileURL} from './operations-ui.js';
+import {ui,conductor,music,canceled,performance,back,badge,money,dateText,input,bindActions,act,dialog,eventEditor,songEditor,uploadDialog,fileURL,pickedFiles,sendFiles,LEDGER_FILE_HINT} from './operations-ui.js';
 
 function songList(songs,assigned=new Set()){
   const s=ui.state;
@@ -55,7 +55,10 @@ export function financeView(){
 }
 
 function ledgerEditor(row=null){
-  dialog(row?'회계 항목 수정':'회계 항목 추가',`${input('title','내용',row?.title||'','text',true)}${input('date','날짜',row?.date||todayKst(),'date',true)}<div class="form-columns"><label>구분<select name="direction">${['수입','지출'].map(x=>`<option ${row?.direction===x?'selected':''}>${x}</option>`).join('')}</select></label><label>분류<select name="classification">${ui.state.finance.classifications.map(x=>`<option ${row?.classification===x?'selected':''}>${esc(x)}</option>`).join('')}</select></label></div>${input('amount','금액 (원)',row?.amount||'','number',true)}${input('owner','담당자',row?.owner||ui.state.me.name)}<label>비고<textarea name="note" rows="3">${esc(row?.note||'')}</textarea></label>`,'저장',async(f,requestId)=>{await api(row?'PUT':'POST',`/api/ledger${row?'/'+row.id:''}`,{request_id:requestId,edited_at:row?.edited_at,title:f.title.value,date:f.date.value,direction:f.direction.value,classification:f.classification.value,amount:Number(f.amount.value),owner:f.owner.value,note:f.note.value,semester:ui.state.semester.id});await ui.refresh();});
+  let picked=[],savedId=''; // savedId: 항목은 저장됐고 파일만 실패한 뒤의 재시도. 항목을 다시 저장하지 않는다(수정은 edited_at 이 바뀌어 409 가 난다).
+  const d=dialog(row?'회계 항목 수정':'회계 항목 추가',`${input('title','내용',row?.title||'','text',true)}${input('date','날짜',row?.date||todayKst(),'date',true)}<div class="form-columns"><label>구분<select name="direction">${['수입','지출'].map(x=>`<option ${row?.direction===x?'selected':''}>${x}</option>`).join('')}</select></label><label>분류<select name="classification">${ui.state.finance.classifications.map(x=>`<option ${row?.classification===x?'selected':''}>${esc(x)}</option>`).join('')}</select></label></div>${input('amount','금액 (원)',row?.amount||'','number',true)}${input('owner','담당자',row?.owner||ui.state.me.name)}<label>비고<textarea name="note" rows="3">${esc(row?.note||'')}</textarea></label><label>증빙 파일 (선택 · 여러 개 가능)<input name="file" type="file" multiple></label><p class="muted">${LEDGER_FILE_HINT}</p>`,'저장',async(f,requestId,dlg)=>{if(!savedId){const saved=await api(row?'PUT':'POST',`/api/ledger${row?'/'+row.id:''}`,{request_id:requestId,edited_at:row?.edited_at,title:f.title.value,date:f.date.value,direction:f.direction.value,classification:f.classification.value,amount:Number(f.amount.value),owner:f.owner.value,note:f.note.value,semester:ui.state.semester.id});savedId=row?.id||saved.id;[...f].forEach(el=>{if(el.name&&el.name!=='file')el.disabled=true;});}
+    if(picked.length)await sendFiles('ledger',savedId,picked,dlg,undefined,true);await ui.refresh();});
+  d.querySelector('[name=file]').onchange=e=>{picked=pickedFiles(e.target.files);};
 }
 
 export function settingsView(){

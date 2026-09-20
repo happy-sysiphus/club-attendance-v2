@@ -29,6 +29,10 @@ PERMANENT_CODES = {"validation_error", "object_not_found", "unauthorized", "rest
 ENV_IDS = {kind: f"NOTION_{kind.upper()}_DATABASE_ID" for kind in (*SCHEMAS, "roster", "ledger")}
 
 
+class UnsupportedFileType(Exception):
+    """노션 파일 업로드가 이 파일명(확장자)을 받지 않는다."""
+
+
 class NotionUnavailable(Exception):
     pass
 
@@ -369,15 +373,18 @@ class OperationsStore:
         headers = {"Authorization": f"Bearer {config.NOTION_TOKEN}", "Notion-Version": "2022-06-28"}
         chunk_size = 10 * 1024 * 1024
         multi = size > 20 * 1024 * 1024
-        payload = {"filename": filename, "content_type": content_type,
-                   "mode": "multi_part" if multi else "single_part"}
+        payload = {"filename": filename, "mode": "multi_part" if multi else "single_part"}
+        if content_type:   # 없으면 노션이 확장자로 정한다 (형식 제한 없는 회계 증빙)
+            payload["content_type"] = content_type
         if multi:
             payload["number_of_parts"] = math.ceil(size / chunk_size)
         try:
             with httpx.Client(headers=headers, timeout=120) as client:
                 r = client.post("https://api.notion.com/v1/file_uploads", json=payload)
+                if r.status_code == 400 and "`filename`" in r.text:
+                    raise UnsupportedFileType(filename)   # 확장자가 없거나 노션이 받지 않는 확장자(.hwp, .exe …)
                 r.raise_for_status()
-                upload_id = r.json()["id"]
+                upload_id, content_type = r.json()["id"], r.json().get("content_type") or content_type
                 count = payload.get("number_of_parts", 1)
                 for index in range(count):
                     chunk = file.read(chunk_size if multi else size)
