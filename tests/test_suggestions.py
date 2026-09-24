@@ -1,4 +1,4 @@
-"""건의함: 누구나 이름을 남겨 보내고, 집행부(단장·홍보·총무)만 전부 읽고 처리 상태를 바꾼다."""
+"""건의함: 누구나 이름을 남겨 보내고, 집행부·파트장·지휘자가 전부 읽는다. 처리 상태는 집행부(단장·홍보·총무)만."""
 import copy
 
 import pytest
@@ -111,7 +111,7 @@ class SuggestionStore(SnapshotStore):
         return kind == "suggestions"
 
 
-def test_snapshot_executive_sees_all_member_sees_own():
+def test_snapshot_leaders_see_all_member_sees_own():
     rows = [suggestion("a", author="s", created_at="2026-09-20T09:00:00"),
             suggestion("b", author="c", status="반영함", created_at="2026-09-22T09:00:00"),
             suggestion("c", author="s", status="", created_at="2026-09-23T09:00:00"),
@@ -123,6 +123,8 @@ def test_snapshot_executive_sees_all_member_sees_own():
     mine = Operations(SuggestionStore(rows)).snapshot("s")
     assert [x["id"] for x in mine["suggestions"]] == ["c", "a"]
     assert mine["open_suggestions"] == 0
+    conductor = Operations(SuggestionStore(rows)).snapshot("c")                # 지휘자: 전부 보되 처리 알림은 없다
+    assert [x["id"] for x in conductor["suggestions"]] == ["c", "b", "a"] and conductor["open_suggestions"] == 0
     assert SOPRANO["admin_role"] == "" and HEAD["admin_role"] == "head"
 
 
@@ -160,3 +162,10 @@ def test_pinned_empty_db_gets_its_title_column_renamed_not_duplicated():
     assert {"내용", "작성자", "처리 상태", "처리자", "처리 시각"} <= set(missing)
     # 앱이 만든 DB처럼 이미 다 있으면 건드리지 않는다
     assert missing_properties(definitions, {label: {"type": typ} for label, typ, *_ in fields.values()}, "건의") == {}
+
+
+@pytest.mark.parametrize("who, sees_all", [(HEAD, True), (PUBLICITY, True), (TREASURER, True), (LEADER, True),
+                                          (CONDUCTOR, True), (PLAIN, False), (member("a", part="accompanist"), False)])
+def test_who_reads_every_suggestion(who, sees_all):
+    from app.operations import reads_all_suggestions
+    assert reads_all_suggestions(who) is sees_all

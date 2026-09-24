@@ -193,24 +193,25 @@ export function adminView(){
   ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">ADMINISTRATION</p><h1>일정과 사진 기록</h1><p class="muted">빨간 느낌표가 있는 일정에 사진을 등록해 주세요.</p></section>${adminEditor()?'<button class="btn" data-write data-new-event="admin">행정 일정 등록</button>':''}${list([...ui.state.events].sort((a,b)=>b.starts_at.localeCompare(a.starts_at)))}`;bindActions();
 }
 
-// ---------- 건의함: 누구나 이름을 남겨 보내고, 집행부(단장·홍보·총무)가 모두 읽고 처리 상태를 바꾼다 ----------
+// ---------- 건의함: 누구나 이름을 남겨 보내고, 집행부·파트장·지휘자가 모두 읽는다. 처리 상태는 집행부(단장·홍보·총무)만 바꾼다 ----------
 const SUGGESTION_STATUSES=['접수','확인함','반영함','보류'];
 const SUGGESTION_CHIP={'접수':'','확인함':'late','반영함':'present','보류':'absent'};
 const executive=()=>['head','publicity','treasurer'].includes(ui.state.me.admin_role);
+const readsAll=()=>executive()||['part_leader','conductor'].includes(ui.state.me.role); // 서버 reads_all_suggestions 와 같다
 const stamp=iso=>esc((iso||'').replace('T',' ').slice(0,16));
 // 실시간 갱신·처리 표시 뒤에는 화면을 새로 그린다. 쓰던 건의와 거르기 값, 요청 ID(재시도 중복 방지)는 그 사이에도 유지한다.
 let suggestDraft='', suggestRequest=crypto.randomUUID(), suggestFilter='';
 
 export function suggestionsView(){
-  const s=ui.state, exec=executive(), items=s.suggestions||[];
+  const s=ui.state, exec=executive(), all=readsAll(), items=s.suggestions||[];
   if(!s.suggestions_enabled){ui.root.innerHTML=emptyState('건의함을 준비하지 못했어요','앱을 만든 사람에게 알려 주세요.');return;}
-  ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">SUGGESTIONS</p><h1>건의함</h1><p class="muted">글리에 바라는 점을 남겨 주세요. 이름과 함께 집행부(단장·홍보·총무)에게 전달되고, 처리 상태는 아래에서 볼 수 있어요.</p></section>
+  ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">SUGGESTIONS</p><h1>건의함</h1><p class="muted">글리에 바라는 점을 남겨 주세요. 이름과 함께 집행부(단장·홍보·총무)와 파트장·지휘자에게 전달되고, 집행부가 처리 상태를 표시해요.</p></section>
     <form class="card stack" id="suggest-form"><label>건의 내용<textarea name="body" rows="5" maxlength="2000" required placeholder="예: 연습 전날까지 악보를 올려 주면 좋겠어요">${esc(suggestDraft)}</textarea></label><p class="muted">보내는 사람 · ${esc(s.me.name)}${PART[s.me.part]?' · '+PART[s.me.part]:''}</p><button class="btn primary" data-write>보내기</button></form>
-    <section class="stack"><div class="row between"><h2>${exec?'받은 건의':'내가 보낸 건의'} <span class="count-label">${items.length}</span></h2>${exec&&items.length?`<select id="suggest-filter" aria-label="처리 상태로 거르기"><option value="">전체</option>${SUGGESTION_STATUSES.map(v=>`<option ${v===suggestFilter?'selected':''}>${v}</option>`).join('')}</select>`:''}</div><div id="suggest-list"></div></section>`;
+    <section class="stack"><div class="row between"><h2>${all?'모든 건의':'내가 보낸 건의'} <span class="count-label">${items.length}</span></h2>${all&&items.length?`<select id="suggest-filter" aria-label="처리 상태로 거르기"><option value="">전체</option>${SUGGESTION_STATUSES.map(v=>`<option ${v===suggestFilter?'selected':''}>${v}</option>`).join('')}</select>`:''}</div><div id="suggest-list"></div></section>`;
   const draw=()=>{
     const want=ui.root.querySelector('#suggest-filter')?.value||'';
     const shown=items.filter(x=>!want||(x.status||'접수')===want);
-    ui.root.querySelector('#suggest-list').innerHTML=shown.length?shown.map(x=>{const st=x.status||'접수';return `<article class="ledger-row"><div class="row between">${exec?`<strong>${esc(x.member_name)}${x.part?` <span class="muted">${esc(x.part)}</span>`:''}</strong>`:`<span class="muted">${stamp(x.created_at)}</span>`}<span class="chip ${SUGGESTION_CHIP[st]||''}">${esc(st)}</span></div><p class="prose">${esc(x.body)}</p>${exec?`<p class="muted">${stamp(x.created_at)}</p>`:''}${x.handled_by?`<p class="muted">처리 ${esc(x.handled_by)} · ${stamp(x.handled_at)}</p>`:''}${exec?`<div class="segment suggestion-status" role="group" aria-label="처리 상태">${SUGGESTION_STATUSES.map(v=>`<button type="button" data-mark="${x.id}" data-status="${v}" aria-pressed="${st===v}" data-write>${v}</button>`).join('')}</div>`:''}</article>`;}).join(''):emptyState(exec?(items.length?'이 상태의 건의가 없어요':'받은 건의가 없어요'):'보낸 건의가 없어요');
+    ui.root.querySelector('#suggest-list').innerHTML=shown.length?shown.map(x=>{const st=x.status||'접수';return `<article class="ledger-row"><div class="row between">${all?`<strong>${esc(x.member_name)}${x.part?` <span class="muted">${esc(x.part)}</span>`:''}</strong>`:`<span class="muted">${stamp(x.created_at)}</span>`}<span class="chip ${SUGGESTION_CHIP[st]||''}">${esc(st)}</span></div><p class="prose">${esc(x.body)}</p>${all?`<p class="muted">${stamp(x.created_at)}</p>`:''}${x.handled_by?`<p class="muted">처리 ${esc(x.handled_by)} · ${stamp(x.handled_at)}</p>`:''}${exec?`<div class="segment suggestion-status" role="group" aria-label="처리 상태">${SUGGESTION_STATUSES.map(v=>`<button type="button" data-mark="${x.id}" data-status="${v}" aria-pressed="${st===v}" data-write>${v}</button>`).join('')}</div>`:''}</article>`;}).join(''):emptyState(all?(items.length?'이 상태의 건의가 없어요':'아직 건의가 없어요'):'보낸 건의가 없어요');
     ui.root.querySelectorAll('[data-mark]').forEach(b=>b.onclick=async()=>{
       if(b.getAttribute('aria-pressed')==='true')return;
       ui.root.querySelectorAll(`[data-mark="${b.dataset.mark}"]`).forEach(x=>x.disabled=true);
