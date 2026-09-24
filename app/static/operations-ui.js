@@ -1,5 +1,5 @@
 import {api, esc, fmtDate, todayKst, session, setSession, setReadOnly, isReadOnly, writeCount, noteWrite, PART, STATUS} from './api.js';
-import {dateTile, emptyState, describe, lockCopy} from './ui.js';
+import {dateTile, emptyState, describe, lockCopy, myStatusForm} from './ui.js';
 
 export const ui = {state: null, root: null, refresh: null, toast: null};
 export const getState = () => ui.state;
@@ -102,33 +102,15 @@ export function dialog(title, contents, submit, onSave) {
   d.showModal(); return d;
 }
 
-// ---------- 다음 연습 카드: 홈에서 바로 출석 저장, 파트장·지휘자는 현황판 1탭 ----------
-// 지각·결석은 사유 창을 띄운다 (내 출석 화면과 같은 규칙: 지각은 사유·도착 예정 필수, 결석 사유는 선택).
-// 이미 같은 상태면 적어 둔 사유를 채워 열어 고칠 수 있게 한다.
-function reasonSheet(practice, status, current) {
-  const late = status === 'late', same = current?.status === status && current.source !== 'auto';
-  dialog(late ? '지각 사유' : '결석 사유',
-    `${input('reason', late ? '사유' : '사유 (선택)', same ? current.reason || '' : '', 'text', late)}${late ? `<label>도착 예정<input name="eta" type="time" value="${esc(same ? current.eta || '' : '')}" required></label>` : '<p class="muted">적지 않아도 저장돼요. 파트장이 현황판에서 사유를 봐요.</p>'}`,
-    '저장', async f => {
-      await api('PUT', `/practices/${practice.id}/me`, late ? {status:'late', reason:f.reason.value.trim(), eta:f.eta.value} : {status:'absent', reason:f.reason.value.trim() || null});
-      ui.toast(`${STATUS[status]}으로 저장했어요`); await ui.refresh();
-    });
-}
-
-async function quickSave(practice, status) {
-  try { await api('PUT', `/practices/${practice.id}/me`, {status}); ui.toast(`${STATUS[status]}으로 저장했어요`); }
-  catch (e) { ui.toast(e.message, true); }
-  await ui.refresh();
-}
-
+// ---------- 다음 연습 카드: 내 출석 화면과 같은 폼으로 저장, 파트장·지휘자는 현황판 1탭 ----------
 function practiceCard(p) {
   const s=ui.state, me=s.me, mine=s.my_attendance[p.id], board=s.boards?.[p.id];
-  // 본인 입력은 자기 파트 확인 전까지 열려 있다. 실제 잠금은 서버가 판단하고 여기선 버튼만 맞춘다.
-  const closed=p.status==='closed', confirmed=!!p.confirmations?.[me.part], editable=!closed&&!confirmed;
-  const note=closed?`마감된 ${p.category==='지휘'?'연습':'일정'}이에요.`:confirmed?`확인 완료 · ${describe(mine||{})}. ${lockCopy(me).locked}`:mine?.status?`현재 · ${describe(mine)}`:'아직 입력 전이에요. 한 번 누르면 저장돼요.';
-  // 시작 후 미입력은 서버가 '결석(자동)'으로 보여 준다. 아직 바꿀 수 있으면 본인이 누른 게 아니므로 눌린 표시를 하지 않고,
-  // 눌렀을 때 실제로 저장되게 한다. 잠긴 뒤에는 결과 그대로 눌린 표시.
-  const self=mine?`<div class="segment quick-status" role="group" aria-label="내 출석">${['present','late','absent'].map(v=>`<button type="button" data-quick-me="${v}" aria-pressed="${mine.status===v&&(mine.source!=='auto'||!editable)}" data-write ${editable?'':'disabled'}>${STATUS[v]}</button>`).join('')}</div><p class="muted">${note}</p>`:'';
+  // 본인 입력은 자기 파트 확인 전까지 열려 있다. 실제 잠금은 서버가 판단하고 여기선 안내만 맞춘다.
+  const closed=p.status==='closed', confirmed=!!p.confirmations?.[me.part];
+  // 내 출석 화면과 같은 폼(아래 operationsHome 에서 끼운다)과 같은 안내 문구
+  const hint=lockCopy(me), noun=p.category==='지휘'?'연습':'일정';
+  const note=closed?`마감된 ${noun}이에요.`:confirmed?`파트 확인이 끝나 여기서는 바꿀 수 없어요. ${hint.locked}`:`${mine?.status&&mine.source!=='auto'?`현재 · ${describe(mine)}. `:''}${hint.open}`;
+  const self=mine?`<div data-my-form="${p.id}"></div><p class="muted">${note}</p>`:'';
   let summary='';
   if(board&&conductor()){
     const t=board.totals, parts=Object.values(board.parts), done=parts.filter(x=>x.confirmed).length;
@@ -153,7 +135,10 @@ export function operationsHome() {
     <div class="home-overview ${conductor()?'without-stats':''}">${dup ? practiceCard(practice) : nearest}
     ${!conductor()?`<section class="card attendance-summary"><p class="eyebrow">나의 출석 · ${esc(s.semester.title)}</p><p class="big">${stats.total?Math.round(stats.rate*100)+'<span>%</span>':'—'}</p><progress class="attendance-progress" max="100" value="${Math.round(stats.rate*100)}"></progress><div class="stat-breakdown"><span>출석 <b>${stats.present}</b></span><span>지각 <b>${stats.late}</b></span><span>결석 <b>${stats.absent}</b></span></div></section>`:''}</div>
     <section class="stack"><div class="row between"><h2>다가오는 일정 <span class="count-label">${events.length}</span></h2><div class="row">${conductor()?'<button class="btn small" data-write data-new-event="rehearsal">지휘 일정 등록</button>':''}${adminEditor()?'<button class="btn small" data-write data-new-event="admin">행정 일정 등록</button>':''}</div></div>${list(events)}</section>`;
-  ui.root.querySelectorAll('[data-quick-me]').forEach(b=>b.onclick=()=>{const v=b.dataset.quickMe, cur=s.my_attendance[practice.id]; if(v!=='present')return reasonSheet(practice,v,cur); if(v===cur?.status&&cur.source!=='auto')return; quickSave(practice,v);});
+  ui.root.querySelectorAll('[data-my-form]').forEach(slot=>{
+    const id=slot.dataset.myForm, p=s.events.find(e=>e.id===id), locked=p.status==='closed'||!!p.confirmations?.[s.me.part]||!!s.stale;
+    slot.replaceWith(myStatusForm(id,s.my_attendance[id],locked,ui.toast,ui.refresh));
+  });
   bindActions();
 }
 

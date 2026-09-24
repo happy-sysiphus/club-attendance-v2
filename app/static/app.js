@@ -1,5 +1,5 @@
 import { api, session, setSession, clearSession, track, esc, fmtDate, todayKst, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
-import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState, describe, lockCopy } from './ui.js';
+import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState, describe, lockCopy, statusForm, myStatusForm, clearDrafts } from './ui.js';
 import { loadOperations, showCached, getState, operationsHome, operationsCalendar, eventView, dayView, adminView, suggestionsView } from './operations-ui.js';
 import { musicView, concertView, songView, financeView, settingsView } from './library-finance.js';
 
@@ -41,7 +41,7 @@ function renderHeader() {
 }
 document.getElementById('logout').onclick = async () => {
   try { await api('POST', '/auth/logout'); }
-  finally { clearSession(); sessionStorage.removeItem('glee-semester'); changeSource?.close(); location.hash = '#/login'; }
+  finally { clearSession(); clearDrafts(); sessionStorage.removeItem('glee-semester'); changeSource?.close(); location.hash = '#/login'; }
 };
 
 // ---------- 로그인 ----------
@@ -124,39 +124,6 @@ function partPicker() {
   d.showModal();
 }
 
-// ---------- 상태 폼 (단원 본인 입력 · 현황판 수정 시트 공용) ----------
-function statusForm(initial, locked) {
-  const form = document.createElement('form');
-  form.className = 'status-form stack';
-  const dis = locked ? 'disabled' : '';
-  form.innerHTML = `
-    <div class="segment" role="radiogroup" aria-label="출석 상태">
-      ${['present', 'late', 'absent'].map(v => `
-        <label><input type="radio" name="status" value="${v}" ${initial.status === v ? 'checked' : ''} ${dis}><span>${STATUS[v]}</span></label>`).join('')}
-    </div>
-    <label class="f-reason">사유 <input name="reason" value="${esc(initial.reason)}" placeholder="예: 수업, 버스 지연" ${dis}></label>
-    <label class="f-eta">도착 예정 <input name="eta" type="time" value="${esc(initial.eta)}" ${dis}></label>
-    ${locked ? '' : '<button class="btn primary full-width">출석 상태 저장</button>'}`;
-  const f = form.elements;
-  const sync = () => {
-    const st = f.status.value;
-    form.dataset.status = st;
-    const btn = form.querySelector('button');
-    if (btn) btn.disabled = !st || (st === 'late' && !(f.reason.value.trim() && f.eta.value));
-  };
-  form.oninput = sync;
-  sync();
-  form.read = () => {
-    const st = f.status.value;
-    return {
-      status: st,
-      reason: st === 'present' ? null : (f.reason.value.trim() || null),
-      eta: st === 'late' ? f.eta.value : null,
-    };
-  };
-  return form;
-}
-
 // ---------- 내 출석 입력 ----------
 async function practiceView(id) {
   if (session().role === 'conductor') { location.hash = `#/board/${id}`; return; }
@@ -183,13 +150,7 @@ async function practiceView(id) {
         : confirmed ? `<p class="muted">파트 확인이 끝나 여기서는 바꿀 수 없어요. ${hint.locked}</p>` : ''}
       <div id="form"></div>
     </section>`;
-  const form = statusForm(me, closed || confirmed || getState().stale);
-  view.querySelector('#form').replaceWith(form);
-  form.onsubmit = async e => {
-    e.preventDefault();
-    try { await api('PUT', `/practices/${id}/me`, form.read()); toast('저장했어요'); route(); }
-    catch (err) { toast(err.message, true); if (err.status === 403 || err.status === 409) route(); }
-  };
+  view.querySelector('#form').replaceWith(myStatusForm(id, me, closed || confirmed || getState().stale, toast, route));
 }
 
 // ---------- 현황판 ----------
@@ -379,6 +340,7 @@ const routes = [
 ];
 
 let generation = 0;
+let lastHash = '';
 let redraw = null;      // 지금 화면을 다시 그리는 함수 (실시간 갱신용)
 let staleView = false;  // 새 스냅숏은 받았는데 입력 중이라 화면을 못 갈아 끼운 상태
 // 입력 중이거나 화면 안의 창(현황판 수정 창)이 열려 있으면 다시 그리지 않는다 — 쓰던 내용이 사라진다.
@@ -393,6 +355,8 @@ async function route(quick = false) {
   staleView = false;
   if (cleanup) { cleanup(); cleanup = null; }
   const hash = location.hash || '#/home';
+  if (hash !== lastHash) clearDrafts(); // 출석 입력 초안은 같은 화면을 다시 그릴 때만 남긴다
+  lastHash = hash;
   const match = routes.find(([re]) => re.test(hash));
   if (!match) { location.hash = '#/home'; return; }
   const [re, fn] = match;
