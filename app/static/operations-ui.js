@@ -103,11 +103,16 @@ export function dialog(title, contents, submit, onSave) {
 }
 
 // ---------- 다음 연습 카드: 홈에서 바로 출석 저장, 파트장·지휘자는 현황판 1탭 ----------
-function lateSheet(practice) {
-  dialog('지각 사유', `${input('reason','사유','','text',true)}<label>도착 예정<input name="eta" type="time" required></label>`, '저장', async f => {
-    await api('PUT', `/practices/${practice.id}/me`, {status:'late', reason:f.reason.value.trim(), eta:f.eta.value});
-    ui.toast('지각으로 저장했어요'); await ui.refresh();
-  });
+// 지각·결석은 사유 창을 띄운다 (내 출석 화면과 같은 규칙: 지각은 사유·도착 예정 필수, 결석 사유는 선택).
+// 이미 같은 상태면 적어 둔 사유를 채워 열어 고칠 수 있게 한다.
+function reasonSheet(practice, status, current) {
+  const late = status === 'late', same = current?.status === status && current.source !== 'auto';
+  dialog(late ? '지각 사유' : '결석 사유',
+    `${input('reason', late ? '사유' : '사유 (선택)', same ? current.reason || '' : '', 'text', late)}${late ? `<label>도착 예정<input name="eta" type="time" value="${esc(same ? current.eta || '' : '')}" required></label>` : '<p class="muted">적지 않아도 저장돼요. 파트장이 현황판에서 사유를 봐요.</p>'}`,
+    '저장', async f => {
+      await api('PUT', `/practices/${practice.id}/me`, late ? {status:'late', reason:f.reason.value.trim(), eta:f.eta.value} : {status:'absent', reason:f.reason.value.trim() || null});
+      ui.toast(`${STATUS[status]}으로 저장했어요`); await ui.refresh();
+    });
 }
 
 async function quickSave(practice, status) {
@@ -148,7 +153,7 @@ export function operationsHome() {
     <div class="home-overview ${conductor()?'without-stats':''}">${dup ? practiceCard(practice) : nearest}
     ${!conductor()?`<section class="card attendance-summary"><p class="eyebrow">나의 출석 · ${esc(s.semester.title)}</p><p class="big">${stats.total?Math.round(stats.rate*100)+'<span>%</span>':'—'}</p><progress class="attendance-progress" max="100" value="${Math.round(stats.rate*100)}"></progress><div class="stat-breakdown"><span>출석 <b>${stats.present}</b></span><span>지각 <b>${stats.late}</b></span><span>결석 <b>${stats.absent}</b></span></div></section>`:''}</div>
     <section class="stack"><div class="row between"><h2>다가오는 일정 <span class="count-label">${events.length}</span></h2><div class="row">${conductor()?'<button class="btn small" data-write data-new-event="rehearsal">지휘 일정 등록</button>':''}${adminEditor()?'<button class="btn small" data-write data-new-event="admin">행정 일정 등록</button>':''}</div></div>${list(events)}</section>`;
-  ui.root.querySelectorAll('[data-quick-me]').forEach(b=>b.onclick=()=>{const v=b.dataset.quickMe, cur=s.my_attendance[practice.id]; if(v===cur?.status&&cur.source!=='auto')return; v==='late'?lateSheet(practice):quickSave(practice,v);});
+  ui.root.querySelectorAll('[data-quick-me]').forEach(b=>b.onclick=()=>{const v=b.dataset.quickMe, cur=s.my_attendance[practice.id]; if(v!=='present')return reasonSheet(practice,v,cur); if(v===cur?.status&&cur.source!=='auto')return; quickSave(practice,v);});
   bindActions();
 }
 
