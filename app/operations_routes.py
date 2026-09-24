@@ -359,6 +359,14 @@ def install(app, notion, conn):
                 return {"id": saved}   # 최초 성공과 재시도가 같은 형태를 돌려준다
             return await run_in_threadpool(execute, member_id, persist)
 
+    @app.post("/api/suggestions", status_code=201)
+    def suggestion_create(body: dict = Body(...), member_id=Depends(identity)):
+        return execute(member_id, operations.save_suggestion, body)
+
+    @app.put("/api/suggestions/{suggestion_id}/status")
+    def suggestion_status(suggestion_id: str, body: dict = Body(...), member_id=Depends(identity)):
+        return execute(member_id, operations.mark_suggestion, suggestion_id, body)
+
     @app.post("/api/ledger", status_code=201)
     def ledger_create(body: dict = Body(...), member_id=Depends(identity)):
         return execute(member_id, operations.save_ledger, body)

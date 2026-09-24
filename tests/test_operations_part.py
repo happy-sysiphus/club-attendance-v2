@@ -44,7 +44,7 @@ def make(*members):
     ops = Operations(StubStore())
     data = {"members": list(members), "events": [dict(EVENT)], "attendance": [],
             "semesters": [], "songs": [], "materials": [], "acknowledgements": [],
-            "ledger": []}
+            "ledger": [], "suggestions": []}
     return ops, data
 
 

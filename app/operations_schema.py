@@ -56,6 +56,14 @@ SCHEMAS = {
         "reason": ("사유", "rich_text"), "eta": ("도착 예정", "rich_text"),
         "source": ("입력 역할", "select"), "updated_at": ("수정 시각", "date"),
     }),
+    # 앱의 '건의' 메뉴. 이름을 남기고, 집행부(단장·홍보·총무)가 모두 읽고 처리 상태를 바꾼다.
+    "suggestions": ("건의함", {
+        "title": ("건의", "title"), "key": ("앱 키", "rich_text"),
+        "body": ("내용", "rich_text"), "member": ("단원 ID", "rich_text"),
+        "member_name": ("작성자", "rich_text"), "part": ("파트", "select"),
+        "created_at": ("작성 시각", "date"), "status": ("처리 상태", "select"),
+        "handled_by": ("처리자", "rich_text"), "handled_at": ("처리 시각", "date"),
+    }),
 }
 
 LEDGER = {

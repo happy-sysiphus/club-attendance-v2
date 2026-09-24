@@ -138,7 +138,8 @@ class SnapshotStore:
         semester = {"id": "sem", "title": "2026년 2학기", "year": 2026, "half": 2, "state": "active",
                     "carry": 0, "carry_at": "", "previous": "", "transition_at": ""}
         return copy.deepcopy({"semesters": [semester], "songs": [], "events": self.events, "materials": [],
-                              "acknowledgements": [], "attendance": self.attendance, "ledger": []}[kind])
+                              "acknowledgements": [], "attendance": self.attendance, "ledger": [],
+                              "suggestions": []}[kind])
 
     def roster(self, fresh=False):
         return copy.deepcopy([HEAD, CONDUCTOR, SOPRANO])

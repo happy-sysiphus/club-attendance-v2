@@ -1,6 +1,6 @@
 import { api, session, setSession, clearSession, track, esc, fmtDate, todayKst, PART, PARTS, ROLE, STATUS, ApiError } from './api.js';
 import { icon, dateTile, practiceBadge, practiceMeta, backLink, emptyState, describe, lockCopy } from './ui.js';
-import { loadOperations, showCached, getState, operationsHome, operationsCalendar, eventView, dayView, adminView } from './operations-ui.js';
+import { loadOperations, showCached, getState, operationsHome, operationsCalendar, eventView, dayView, adminView, suggestionsView } from './operations-ui.js';
 import { musicView, concertView, songView, financeView, settingsView } from './library-finance.js';
 
 const view = document.getElementById('view');
@@ -373,6 +373,7 @@ const routes = [
   [/^#\/song\/([\w-]+)$/, songView],
   [/^#\/finance$/, financeView],
   [/^#\/settings$/, settingsView],
+  [/^#\/suggest$/, suggestionsView],
   [/^#\/practice\/([\w-]+)$/, practiceView],
   [/^#\/board\/([\w-]+)$/, boardView],
 ];

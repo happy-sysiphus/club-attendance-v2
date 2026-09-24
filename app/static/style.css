@@ -302,6 +302,9 @@ select:focus, textarea:focus { outline: 2px solid #747480; outline-offset: 2px; 
 .concert-badge, .day-event.concert-badge { background: #e9def6; color: #5a3d7a; }
 .day-event.cancelled { text-decoration: line-through; opacity: .55; }
 .prose { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+/* 건의 처리 상태: 네 칸, 목록 안이라 기본 세그먼트보다 낮게 */
+.segment.suggestion-status { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.segment.suggestion-status button { min-height: 38px; padding: 8px 4px; font-size: 13px; }
 .song-program { margin: 0; padding-left: 24px; }
 .song-program li { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .photo-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }

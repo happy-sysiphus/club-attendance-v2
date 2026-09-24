@@ -64,6 +64,7 @@ function navigation() {
   if (music()) tabs.push(['music','지휘',s.missing_materials.length]);
   if (photos()) tabs.push(['admin','행정',s.missing_photos.length]);
   tabs.push(['finance','재정']);
+  tabs.push(['suggest','건의',s.open_suggestions||0]);
   document.getElementById('tabs').innerHTML = tabs.map(([path,label,n]) => `<a href="#/${path}" ${path === active || path === 'schedule' && ['event','day'].includes(active) || path === 'music' && ['song','concert'].includes(active) ? 'aria-current="page"' : ''}>${label}${badge(n)}</a>`).join('');
   let toolbar = document.getElementById('semester-toolbar');
   if (!toolbar) { toolbar = document.createElement('div'); toolbar.id='semester-toolbar'; document.getElementById('tabs').after(toolbar); }
@@ -141,6 +142,7 @@ export function operationsHome() {
   ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">${esc(s.me.name)}님, 반가워요</p><h1>오늘도, 함께 노래해요.</h1><p class="muted">우리의 다음 만남과 출석을 확인하세요.</p></section>
     ${s.missing_photos.length ? `<a class="warn notice-link" href="#/admin">사진 등록이 필요한 일정 ${s.missing_photos.length}개${badge(s.missing_photos.length)}</a>` : ''}
     ${s.missing_materials.length ? `<a class="warn notice-link" href="#/music">확인하지 않은 필수 자료 ${s.missing_materials.length}개${badge(s.missing_materials.length)}</a>` : ''}
+    ${s.open_suggestions ? `<a class="warn notice-link" href="#/suggest">처리하지 않은 건의 ${s.open_suggestions}개${badge(s.open_suggestions)}</a>` : ''}
     ${s.me.admin_role==='treasurer'&&s.finance.carry_needs_confirmation ? '<a class="warn notice-link" href="#/finance">학기 이월금을 확인해 주세요.</a>' : ''}
     ${practice&&!dup ? practiceCard(practice) : ''}
     <div class="home-overview ${conductor()?'without-stats':''}">${dup ? practiceCard(practice) : nearest}
@@ -189,6 +191,43 @@ export function eventView(id) {
 export function adminView(){
   if(!photos()){ui.root.innerHTML=emptyState('행정 탭 접근 권한이 없어요');return;}
   ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">ADMINISTRATION</p><h1>일정과 사진 기록</h1><p class="muted">빨간 느낌표가 있는 일정에 사진을 등록해 주세요.</p></section>${adminEditor()?'<button class="btn" data-write data-new-event="admin">행정 일정 등록</button>':''}${list([...ui.state.events].sort((a,b)=>b.starts_at.localeCompare(a.starts_at)))}`;bindActions();
+}
+
+// ---------- 건의함: 누구나 이름을 남겨 보내고, 집행부(단장·홍보·총무)가 모두 읽고 처리 상태를 바꾼다 ----------
+const SUGGESTION_STATUSES=['접수','확인함','반영함','보류'];
+const SUGGESTION_CHIP={'접수':'','확인함':'late','반영함':'present','보류':'absent'};
+const executive=()=>['head','publicity','treasurer'].includes(ui.state.me.admin_role);
+const stamp=iso=>esc((iso||'').replace('T',' ').slice(0,16));
+
+export function suggestionsView(){
+  const s=ui.state, exec=executive(), items=s.suggestions||[];
+  let requestId=crypto.randomUUID(); // 실패 후 다시 누르면 같은 요청으로 보내 중복 저장을 막는다
+  ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">SUGGESTIONS</p><h1>건의함</h1><p class="muted">글리에 바라는 점을 남겨 주세요. 이름과 함께 집행부(단장·홍보·총무)에게 전달되고, 처리 상태는 아래에서 볼 수 있어요.</p></section>
+    <form class="card stack" id="suggest-form"><label>건의 내용<textarea name="body" rows="5" maxlength="2000" required placeholder="예: 연습 전날까지 악보를 올려 주면 좋겠어요"></textarea></label><p class="muted">보내는 사람 · ${esc(s.me.name)}${PART[s.me.part]?' · '+PART[s.me.part]:''}</p><button class="btn primary" data-write>보내기</button></form>
+    <section class="stack"><div class="row between"><h2>${exec?'받은 건의':'내가 보낸 건의'} <span class="count-label">${items.length}</span></h2>${exec&&items.length?`<select id="suggest-filter" aria-label="처리 상태로 거르기"><option value="">전체</option>${SUGGESTION_STATUSES.map(v=>`<option>${v}</option>`).join('')}</select>`:''}</div><div id="suggest-list"></div></section>`;
+  const draw=()=>{
+    const want=ui.root.querySelector('#suggest-filter')?.value||'';
+    const shown=items.filter(x=>!want||(x.status||'접수')===want);
+    ui.root.querySelector('#suggest-list').innerHTML=shown.length?shown.map(x=>{const st=x.status||'접수';return `<article class="ledger-row"><div class="row between">${exec?`<strong>${esc(x.member_name)}${x.part?` <span class="muted">${esc(x.part)}</span>`:''}</strong>`:`<span class="muted">${stamp(x.created_at)}</span>`}<span class="chip ${SUGGESTION_CHIP[st]||''}">${esc(st)}</span></div><p class="prose">${esc(x.body)}</p>${exec?`<p class="muted">${stamp(x.created_at)}</p>`:''}${x.handled_by?`<p class="muted">처리 ${esc(x.handled_by)} · ${stamp(x.handled_at)}</p>`:''}${exec?`<div class="segment suggestion-status" role="group" aria-label="처리 상태">${SUGGESTION_STATUSES.map(v=>`<button type="button" data-mark="${x.id}" data-status="${v}" aria-pressed="${st===v}" data-write>${v}</button>`).join('')}</div>`:''}</article>`;}).join(''):emptyState(exec?(items.length?'이 상태의 건의가 없어요':'받은 건의가 없어요'):'보낸 건의가 없어요');
+    ui.root.querySelectorAll('[data-mark]').forEach(b=>b.onclick=async()=>{
+      if(b.getAttribute('aria-pressed')==='true')return;
+      ui.root.querySelectorAll(`[data-mark="${b.dataset.mark}"]`).forEach(x=>x.disabled=true);
+      try{await api('PUT',`/api/suggestions/${b.dataset.mark}/status`,{status:b.dataset.status});ui.toast(`${b.dataset.status}으로 표시했어요`);}
+      catch(e){ui.toast(e.message,true);}
+      await ui.refresh();
+    });
+    bindActions();
+  };
+  ui.root.querySelector('#suggest-filter')?.addEventListener('change',draw);
+  const form=ui.root.querySelector('#suggest-form');
+  form.onsubmit=async e=>{
+    e.preventDefault();
+    const b=form.querySelector('button');if(b.disabled)return;b.disabled=true;
+    try{await api('POST','/api/suggestions',{request_id:requestId,body:form.elements.body.value});requestId=crypto.randomUUID();form.reset();ui.toast('건의를 보냈어요');await ui.refresh();}
+    catch(err){ui.toast(err.message,true);}
+    finally{b.disabled=false;}
+  };
+  draw();
 }
 
 export function eventEditor(event=null,defaultKind='rehearsal') {

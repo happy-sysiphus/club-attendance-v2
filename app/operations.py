@@ -72,6 +72,14 @@ def can_photo(me):
     return me["admin_role"] in ("head", "publicity")
 
 
+SUGGESTION_STATUSES = ("접수", "확인함", "반영함", "보류")
+
+
+def is_executive(me):
+    """집행부: 건의를 모두 읽고 처리 상태를 바꾼다."""
+    return me["admin_role"] in ("head", "publicity", "treasurer")
+
+
 def require(allowed, message="권한이 없습니다"):
     if not allowed:
         raise HTTPException(403, message)
@@ -112,11 +120,12 @@ class Operations:
     def load(self, fresh=False):
         s = self.store
         s.bootstrap()
-        data = {kind: s.read(kind, fresh) for kind in ("semesters", "songs", "events", "materials", "acknowledgements", "attendance", "ledger")}
+        data = {kind: s.read(kind, fresh) for kind in ("semesters", "songs", "events", "materials", "acknowledgements", "attendance", "ledger", "suggestions")}
         data["members"] = s.roster(fresh)
         # Notion permits unfinished blank rows. They are drafts, not app events.
         data["events"] = [e for e in data["events"] if e["title"] and e["starts_at"] and e["semester"] and e["category"] in ("지휘", "행정")]
         data["songs"] = [song for song in data["songs"] if song["title"]]
+        data["suggestions"] = [x for x in data["suggestions"] if x["body"]]   # 노션에서 만든 빈 행 제외
         data["materials"] = [m for m in data["materials"] if m["song"] and m["files"]]
         ledger_total = len(data["ledger"])
         data["ledger"] = [r for r in data["ledger"] if r["title"] and r["direction"] in ("수입", "지출")]
@@ -232,6 +241,10 @@ class Operations:
                 eligible = [e for e in events if has_attendance(e) and not cancelled(e)]
                 result["boards"] = {e["id"]: self.board(data, me, e["id"]) for e in eligible} if me["role"] in ("conductor", "part_leader") else {}
                 result["my_attendance"] = {e["id"]: self.effective(next((a for a in data["attendance"] if a["member"] == me["id"] and a["event"] == e["id"]), None), e) for e in eligible} if me["role"] != "conductor" else {}
+                # 건의: 집행부는 전부, 나머지는 자기가 낸 것만 (처리 상태를 보려고). 학기와 무관하게 최신순.
+                mine = [x for x in data["suggestions"] if is_executive(me) or x["member"] == me["id"]]
+                result["suggestions"] = sorted(mine, key=lambda x: (x["created_at"], x["id"]), reverse=True)
+                result["open_suggestions"] = sum(1 for x in mine if x["status"] in ("", "접수")) if is_executive(me) else 0
                 self.cache[(member_id, sid)] = copy.deepcopy(result)
                 self.cache[(member_id, None)] = copy.deepcopy(result)
                 return result
@@ -397,6 +410,26 @@ class Operations:
         if not row_id:
             values["key"] = operation_key(body)
         return {"id": self.store.save("ledger", values, row_id)}
+
+    def save_suggestion(self, data, me, body):
+        content = text(body, "body", True, 2000)
+        first_line = content.splitlines()[0].strip()
+        values = {"key": operation_key(body), "title": first_line[:60] + ("…" if len(first_line) > 60 else ""),
+                  "body": content, "member": me["id"], "member_name": me["name"],
+                  "part": PART_KO.get(me["part"], ""), "created_at": now(), "status": "접수"}
+        return {"id": self.store.save("suggestions", values)}   # 같은 request_id 재시도는 store 가 기존 행을 돌려준다
+
+    def mark_suggestion(self, data, me, suggestion_id, body):
+        require(is_executive(me), "건의 처리 표시는 집행부(단장·홍보·총무)만 할 수 있어요")
+        suggestion = find(data["suggestions"], suggestion_id)
+        status = text(body, "status", True)
+        if status not in SUGGESTION_STATUSES:
+            raise HTTPException(422, "처리 상태를 선택해 주세요")
+        if status != suggestion["status"]:
+            handled = status != "접수"   # '접수'로 되돌리면 처리자·시각을 비운다
+            self.store.save("suggestions", {"status": status, "handled_by": me["name"] if handled else "",
+                                            "handled_at": now() if handled else ""}, suggestion_id)
+        return {"ok": True}
 
     def carry(self, data, me, semester_id, expected):
         require(me["admin_role"] == "treasurer")
