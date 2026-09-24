@@ -20,7 +20,7 @@ $env:NOTION_SONGS_DATABASE_ID = '3d4749fe4c678118980fdace30a0e35f'
 $env:NOTION_MATERIALS_DATABASE_ID = '3d4749fe4c6781a4b8d7ff28632f10cc'
 $env:NOTION_ACKNOWLEDGEMENTS_DATABASE_ID = '3d4749fe4c67819abd7fddabb8de28e4'
 # 건의함은 첫 실행 때 부모 페이지(지휘부/출석) 아래에 자동 생성된다. 생성 뒤 ID를 고정 (아래 표)
-# $env:NOTION_SUGGESTIONS_DATABASE_ID = '<건의함 DB ID>'
+$env:NOTION_SUGGESTIONS_DATABASE_ID = '3e5749fe4c6781349af9db2b262421cc'
 $env:SECRET_KEY = '<충분히 긴 임의의 문자열>'
 python -m app.main
 ```
@@ -43,7 +43,7 @@ python -m app.main
 | `NOTION_MATERIALS_DATABASE_ID` | 곡별 자료 (`지휘부 / 출석`) | `3d4749fe4c6781a4b8d7ff28632f10cc` |
 | `NOTION_ACKNOWLEDGEMENTS_DATABASE_ID` | 자료 확인 기록 (`지휘부 / 출석`) | `3d4749fe4c67819abd7fddabb8de28e4` |
 | `NOTION_LEDGER_DATABASE_ID` | 26-2 GLEE 회계 장부 (`재정 (총무)`) | `4379fa3860c94a498dbae5e444dd9afd` (기본값) |
-| `NOTION_SUGGESTIONS_DATABASE_ID` | 건의함 (`지휘부 / 출석`) | 첫 실행 때 자동 생성 — 생성된 ID를 지정 |
+| `NOTION_SUGGESTIONS_DATABASE_ID` | 건의함 (`지휘부 / 출석`) | `3e5749fe4c6781349af9db2b262421cc` (2026-09-24 자동 생성) |
 
 ID는 노션에서 DB를 열었을 때 URL의 `/p/<32자리>` 부분입니다(대시 유무 무관). 접근이 안 되면 앱이 어떤 DB·어떤 변수가 문제인지 오류 문구로 알려줍니다. 회계장부는 `출석`과 다른 페이지 트리에 있으므로 integration을 **따로 연결**해야 합니다(장부 또는 `재정 (총무)` 페이지의 연결에 추가).
 
