@@ -75,14 +75,10 @@ def can_photo(me):
 SUGGESTION_STATUSES = ("접수", "확인함", "반영함", "보류")
 
 
-def is_executive(me):
-    """집행부: 건의 처리 상태를 바꾼다."""
-    return me["admin_role"] in ("head", "publicity", "treasurer")
-
-
-def reads_all_suggestions(me):
-    """모든 건의를 이름과 함께 본다: 집행부와 파트장·지휘자. 일반 단원은 자기가 보낸 것만."""
-    return is_executive(me) or me["role"] in ("part_leader", "conductor")
+def handles_suggestions(me):
+    """모든 건의를 이름과 함께 보고 처리 상태를 바꾼다: 집행부(단장·홍보·총무)와 파트장·지휘자.
+    일반 단원·반주자는 자기가 보낸 것만 본다."""
+    return me["admin_role"] in ("head", "publicity", "treasurer") or me["role"] in ("part_leader", "conductor")
 
 
 def require(allowed, message="권한이 없습니다"):
@@ -248,9 +244,9 @@ class Operations:
                 result["boards"] = {e["id"]: self.board(data, me, e["id"]) for e in eligible} if me["role"] in ("conductor", "part_leader") else {}
                 result["my_attendance"] = {e["id"]: self.effective(next((a for a in data["attendance"] if a["member"] == me["id"] and a["event"] == e["id"]), None), e) for e in eligible} if me["role"] != "conductor" else {}
                 # 건의: 집행부·파트장·지휘자는 전부, 나머지는 자기가 낸 것만 (처리 상태를 보려고). 학기와 무관하게 최신순.
-                mine = [x for x in data["suggestions"] if reads_all_suggestions(me) or x["member"] == me["id"]]
+                mine = [x for x in data["suggestions"] if handles_suggestions(me) or x["member"] == me["id"]]
                 result["suggestions"] = sorted(mine, key=lambda x: (x["created_at"], x["id"]), reverse=True)
-                result["open_suggestions"] = sum(1 for x in mine if x["status"] in ("", "접수")) if is_executive(me) else 0
+                result["open_suggestions"] = sum(1 for x in mine if x["status"] in ("", "접수")) if handles_suggestions(me) else 0
                 result["suggestions_enabled"] = self.store.has("suggestions")
                 self.cache[(member_id, sid)] = copy.deepcopy(result)
                 self.cache[(member_id, None)] = copy.deepcopy(result)
@@ -433,7 +429,7 @@ class Operations:
 
     def mark_suggestion(self, data, me, suggestion_id, body):
         self.suggestions_ready()
-        require(is_executive(me), "건의 처리 표시는 집행부(단장·홍보·총무)만 할 수 있어요")
+        require(handles_suggestions(me), "건의 처리 표시는 집행부와 파트장·지휘자만 할 수 있어요")
         suggestion = find(data["suggestions"], suggestion_id)
         status = text(body, "status", True)
         if status not in SUGGESTION_STATUSES:

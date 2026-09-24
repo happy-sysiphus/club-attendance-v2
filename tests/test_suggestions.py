@@ -1,4 +1,4 @@
-"""건의함: 누구나 이름을 남겨 보내고, 집행부·파트장·지휘자가 전부 읽는다. 처리 상태는 집행부(단장·홍보·총무)만."""
+"""건의함: 누구나 이름을 남겨 보내고, 집행부(단장·홍보·총무)와 파트장·지휘자가 전부 읽고 처리 상태를 바꾼다."""
 import copy
 
 import pytest
@@ -60,16 +60,16 @@ def test_empty_or_too_long_is_rejected(body):
     assert exc.value.status_code == 422 and saved(ops) == []
 
 
-@pytest.mark.parametrize("who", [HEAD, PUBLICITY, TREASURER])
-def test_every_executive_marks_status_and_is_recorded(who):
+@pytest.mark.parametrize("who", [HEAD, PUBLICITY, TREASURER, LEADER, CONDUCTOR])
+def test_executives_leaders_and_conductor_mark_status_and_are_recorded(who):
     ops, data = make(suggestion())
     ops.mark_suggestion(data, who, "x", {"status": "확인함"})
     [values] = saved(ops)
     assert values["status"] == "확인함" and values["handled_by"] == who["name"] and values["handled_at"]
 
 
-@pytest.mark.parametrize("who", [PLAIN, LEADER, CONDUCTOR])
-def test_others_cannot_mark(who):
+@pytest.mark.parametrize("who", [PLAIN, member("a", part="accompanist")])
+def test_members_cannot_mark(who):
     ops, data = make(suggestion(author=who["id"]))   # 자기가 낸 건의라도
     with pytest.raises(HTTPException) as exc:
         ops.mark_suggestion(data, who, "x", {"status": "반영함"})
@@ -123,8 +123,8 @@ def test_snapshot_leaders_see_all_member_sees_own():
     mine = Operations(SuggestionStore(rows)).snapshot("s")
     assert [x["id"] for x in mine["suggestions"]] == ["c", "a"]
     assert mine["open_suggestions"] == 0
-    conductor = Operations(SuggestionStore(rows)).snapshot("c")                # 지휘자: 전부 보되 처리 알림은 없다
-    assert [x["id"] for x in conductor["suggestions"]] == ["c", "b", "a"] and conductor["open_suggestions"] == 0
+    conductor = Operations(SuggestionStore(rows)).snapshot("c")                # 지휘자도 전부 보고 처리 알림을 받는다
+    assert [x["id"] for x in conductor["suggestions"]] == ["c", "b", "a"] and conductor["open_suggestions"] == 2
     assert SOPRANO["admin_role"] == "" and HEAD["admin_role"] == "head"
 
 
@@ -166,6 +166,6 @@ def test_pinned_empty_db_gets_its_title_column_renamed_not_duplicated():
 
 @pytest.mark.parametrize("who, sees_all", [(HEAD, True), (PUBLICITY, True), (TREASURER, True), (LEADER, True),
                                           (CONDUCTOR, True), (PLAIN, False), (member("a", part="accompanist"), False)])
-def test_who_reads_every_suggestion(who, sees_all):
-    from app.operations import reads_all_suggestions
-    assert reads_all_suggestions(who) is sees_all
+def test_who_reads_and_handles_every_suggestion(who, sees_all):
+    from app.operations import handles_suggestions
+    assert handles_suggestions(who) is sees_all
