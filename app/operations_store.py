@@ -124,43 +124,37 @@ class OperationsStore:
             raise NotionUnavailable(f"노션 명단·출석 데이터베이스 연결을 확인해 주세요: {exc}") from exc
         existing = {}
         # 부모 페이지 스캔은 환경변수·캐시 어느 쪽에도 ID가 없는 DB가 있을 때만 (첫 설치 또는 미지정 재배포)
-        if any(not env[k] and not self.notion._get(self.conn, f"ops_{k}_id") for k in SCHEMAS if k != "attendance" and k not in OPTIONAL):
-            cursor = None
-            while True:
-                args = {"block_id": self.notion.parent_page_id, "page_size": 100}
-                if cursor:
-                    args["start_cursor"] = cursor
-                result = self.call(self.client.blocks.children.list, **args)
-                for block in result["results"]:
-                    if block["type"] == "child_database":
-                        existing[block["child_database"]["title"]] = block["id"]
-                if not result.get("has_more"):
-                    break
-                cursor = result["next_cursor"]
+        need_scan = [k for k in SCHEMAS if k != "attendance" and not env[k] and not self.notion._get(self.conn, f"ops_{k}_id")]
+        if need_scan:
+            try:
+                cursor = None
+                while True:
+                    args = {"block_id": self.notion.parent_page_id, "page_size": 100}
+                    if cursor:
+                        args["start_cursor"] = cursor
+                    result = self.call(self.client.blocks.children.list, **args)
+                    for block in result["results"]:
+                        if block["type"] == "child_database":
+                            existing[block["child_database"]["title"]] = block["id"]
+                    if not result.get("has_more"):
+                        break
+                    cursor = result["next_cursor"]
+            except NotionUnavailable:
+                if any(k not in OPTIONAL for k in need_scan):
+                    raise
+                log.warning("부모 페이지를 읽지 못해 선택 DB %s 를 건너뜁니다", need_scan)
+                existing = None   # 찾지 못한 채 새로 만들면 재배포마다 빈 DB가 쌓인다
         for kind, (name, fields) in SCHEMAS.items():
-            if kind in OPTIONAL and not env[kind]:
-                continue   # 지정하지 않은 선택 DB: 찾거나 만들지 않고 그 기능을 끈다 (has() 가 False)
-            database_id = env[kind] or self.notion._get(self.conn, f"ops_{kind}_id") or existing.get(name)
-            if kind == "attendance":
-                database_id = env[kind] or self.notion._get(self.conn, "attendance_db_id")
-            definitions = {}
-            for field, (label, typ, *target) in fields.items():
-                definitions[label] = {typ: ({"database_id": self.ids[target[0]],
-                                           "single_property": {}} if typ == "relation" else {})}
-            if database_id:
-                meta = self._retrieve(kind, name, database_id)
-                title = next(label for label, typ, *_ in fields.values() if typ == "title")
-                missing = missing_properties(definitions, meta["properties"], title)
-                if missing:
-                    meta = self.call(self.client.databases.update, database_id=database_id, properties=missing)
-            else:
-                meta = self.call(self.client.databases.create,
-                                 parent={"page_id": self.notion.parent_page_id},
-                                 title=[{"text": {"content": name}}], properties=definitions)
-            self.ids[kind] = meta["id"]
-            self.props[kind] = {field: meta["properties"][value[0]]["id"] for field, value in fields.items()}
-            self.notion._set(self.conn, f"ops_{kind}_id", meta["id"])
-            self.conn.commit()
+            if existing is None and kind in need_scan:
+                continue
+            try:
+                self._ensure(kind, name, fields, env[kind], existing)
+            except NotionUnavailable:
+                if kind not in OPTIONAL:
+                    raise
+                # 건의함처럼 없어도 되는 DB는 준비에 실패해도 로그인·출석을 막지 않는다. 그 기능만 꺼진다(has() 가 False).
+                # ponytail: 다음 재시작 때 다시 시도한다. 실행 중 재시도가 필요해지면 ready 를 DB별로 나눌 것.
+                log.warning("선택 DB '%s' 준비 실패 — 해당 기능을 끕니다", name, exc_info=True)
         roster_id = env["roster"] or self.notion._get(self.conn, "roster_db_id")
         roster = self._retrieve("roster", "명단", roster_id)
         admin_prop = roster["properties"].get("행정 직군")
@@ -192,6 +186,30 @@ class OperationsStore:
         self.props["ledger"] = {field: ledger["properties"][value[0]]["id"] for field, value in LEDGER.items()}
         self.ledger_categories = [o["name"] for o in ledger["properties"]["분류"]["select"]["options"]]
         self.ready = True
+
+    def _ensure(self, kind, name, fields, env_id, existing):
+        """앱 DB 하나를 찾거나(환경변수 → 저장된 ID → 부모 페이지의 같은 제목) 만들고, 빠진 열을 채운다."""
+        database_id = env_id or self.notion._get(self.conn, f"ops_{kind}_id") or existing.get(name)
+        if kind == "attendance":
+            database_id = env_id or self.notion._get(self.conn, "attendance_db_id")
+        definitions = {}
+        for field, (label, typ, *target) in fields.items():
+            definitions[label] = {typ: ({"database_id": self.ids[target[0]],
+                                       "single_property": {}} if typ == "relation" else {})}
+        if database_id:
+            meta = self._retrieve(kind, name, database_id)
+            title = next(label for label, typ, *_ in fields.values() if typ == "title")
+            missing = missing_properties(definitions, meta["properties"], title)
+            if missing:
+                meta = self.call(self.client.databases.update, database_id=database_id, properties=missing)
+        else:
+            meta = self.call(self.client.databases.create,
+                             parent={"page_id": self.notion.parent_page_id},
+                             title=[{"text": {"content": name}}], properties=definitions)
+        self.ids[kind] = meta["id"]
+        self.props[kind] = {field: meta["properties"][value[0]]["id"] for field, value in fields.items()}
+        self.notion._set(self.conn, f"ops_{kind}_id", meta["id"])
+        self.conn.commit()
 
     def cached(self, name, fresh, load):
         hit = self._cache.get(name)

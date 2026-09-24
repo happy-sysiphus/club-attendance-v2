@@ -126,7 +126,7 @@ def test_snapshot_executive_sees_all_member_sees_own():
     assert SOPRANO["admin_role"] == "" and HEAD["admin_role"] == "head"
 
 
-# ---------- 건의함 DB 를 지정하지 않은 배포 ----------
+# ---------- 건의함 DB 를 준비하지 못한 배포 (노션 권한 문제 등) ----------
 
 
 class Unset(StubStore):
@@ -134,7 +134,7 @@ class Unset(StubStore):
         return False
 
 
-def test_without_a_pinned_db_sending_and_marking_are_refused():
+def test_without_the_db_sending_and_marking_are_refused():
     ops = Operations(Unset())
     for call in (lambda: ops.save_suggestion({"suggestions": []}, PLAIN, {"body": "x", "request_id": REQUEST}),
                  lambda: ops.mark_suggestion({"suggestions": [suggestion()]}, HEAD, "x", {"status": "확인함"})):
@@ -144,13 +144,13 @@ def test_without_a_pinned_db_sending_and_marking_are_refused():
     assert ops.store.saved == []
 
 
-def test_without_a_pinned_db_the_menu_is_hidden():
+def test_without_the_db_the_menu_is_hidden():
     snap = Operations(SnapshotStore([], [])).snapshot("h")
     assert snap["suggestions_enabled"] is False and snap["suggestions"] == [] and snap["open_suggestions"] == 0
 
 
 def test_pinned_empty_db_gets_its_title_column_renamed_not_duplicated():
-    """집행부가 노션에서 만든 빈 DB('이름' 제목 열)에 앱이 열을 채울 때 제목 열을 하나 더 만들지 않는다."""
+    """사람이 노션에서 만든 빈 DB('이름' 제목 열)를 지정해도 제목 열을 하나 더 만들지 않는다."""
     from app.operations_schema import SCHEMAS
     from app.operations_store import missing_properties
     fields = SCHEMAS["suggestions"][1]

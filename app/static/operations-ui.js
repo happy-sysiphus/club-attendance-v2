@@ -203,7 +203,7 @@ let suggestDraft='', suggestRequest=crypto.randomUUID(), suggestFilter='';
 
 export function suggestionsView(){
   const s=ui.state, exec=executive(), items=s.suggestions||[];
-  if(!s.suggestions_enabled){ui.root.innerHTML=emptyState('건의함이 아직 연결되지 않았어요','단장에게 알려 주세요.');return;}
+  if(!s.suggestions_enabled){ui.root.innerHTML=emptyState('건의함을 준비하지 못했어요','앱을 만든 사람에게 알려 주세요.');return;}
   ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">SUGGESTIONS</p><h1>건의함</h1><p class="muted">글리에 바라는 점을 남겨 주세요. 이름과 함께 집행부(단장·홍보·총무)에게 전달되고, 처리 상태는 아래에서 볼 수 있어요.</p></section>
     <form class="card stack" id="suggest-form"><label>건의 내용<textarea name="body" rows="5" maxlength="2000" required placeholder="예: 연습 전날까지 악보를 올려 주면 좋겠어요">${esc(suggestDraft)}</textarea></label><p class="muted">보내는 사람 · ${esc(s.me.name)}${PART[s.me.part]?' · '+PART[s.me.part]:''}</p><button class="btn primary" data-write>보내기</button></form>
     <section class="stack"><div class="row between"><h2>${exec?'받은 건의':'내가 보낸 건의'} <span class="count-label">${items.length}</span></h2>${exec&&items.length?`<select id="suggest-filter" aria-label="처리 상태로 거르기"><option value="">전체</option>${SUGGESTION_STATUSES.map(v=>`<option ${v===suggestFilter?'selected':''}>${v}</option>`).join('')}</select>`:''}</div><div id="suggest-list"></div></section>`;

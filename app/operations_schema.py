@@ -57,8 +57,8 @@ SCHEMAS = {
         "source": ("입력 역할", "select"), "updated_at": ("수정 시각", "date"),
     }),
     # 앱의 '건의' 메뉴. 이름을 남기고, 집행부(단장·홍보·총무)가 모두 읽고 처리 상태를 바꾼다.
-    # 이름이 남는 글이라 자동으로 만들지 않는다 (OPTIONAL). 집행부만 보는 노션 페이지에 빈 DB를 만들어
-    # NOTION_SUGGESTIONS_DATABASE_ID 로 지정하면 앱이 열을 채운다. 지정 전에는 건의 메뉴가 숨는다.
+    # 다른 DB처럼 부모 페이지(지휘부/출석) 아래에 자동으로 만든다 — 노션에서 그 페이지를 보는 파트장·지휘자는
+    # 읽을 수 있고, 일반 단원은 못 본다. OPTIONAL: 준비에 실패해도 이 기능만 꺼지고 앱은 계속 돈다.
     "suggestions": ("건의함", {
         "title": ("건의", "title"), "key": ("앱 키", "rich_text"),
         "body": ("내용", "rich_text"), "member": ("단원 ID", "rich_text"),

@@ -415,7 +415,7 @@ class Operations:
 
     def suggestions_ready(self):
         if not self.store.has("suggestions"):
-            raise HTTPException(503, "건의함이 아직 연결되지 않았어요. 단장에게 알려 주세요")
+            raise HTTPException(503, "건의함을 준비하지 못했어요. 앱을 만든 사람에게 알려 주세요")
 
     def save_suggestion(self, data, me, body):
         self.suggestions_ready()
