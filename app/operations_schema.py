@@ -57,6 +57,8 @@ SCHEMAS = {
         "source": ("입력 역할", "select"), "updated_at": ("수정 시각", "date"),
     }),
     # 앱의 '건의' 메뉴. 이름을 남기고, 집행부(단장·홍보·총무)가 모두 읽고 처리 상태를 바꾼다.
+    # 이름이 남는 글이라 자동으로 만들지 않는다 (OPTIONAL). 집행부만 보는 노션 페이지에 빈 DB를 만들어
+    # NOTION_SUGGESTIONS_DATABASE_ID 로 지정하면 앱이 열을 채운다. 지정 전에는 건의 메뉴가 숨는다.
     "suggestions": ("건의함", {
         "title": ("건의", "title"), "key": ("앱 키", "rich_text"),
         "body": ("내용", "rich_text"), "member": ("단원 ID", "rich_text"),
@@ -65,6 +67,8 @@ SCHEMAS = {
         "handled_by": ("처리자", "rich_text"), "handled_at": ("처리 시각", "date"),
     }),
 }
+
+OPTIONAL = {"suggestions"}
 
 LEDGER = {
     "title": ("내용", "title"), "date": ("날짜", "date"),

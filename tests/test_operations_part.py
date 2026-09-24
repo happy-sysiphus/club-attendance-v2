@@ -24,6 +24,9 @@ class StubStore:
         self.saved.append((kind, values, page_id))
         return page_id or "new-page"
 
+    def has(self, kind):
+        return True
+
     def set_part(self, member_id, korean_part):
         self.parts.append((member_id, korean_part))
 

@@ -16,7 +16,7 @@ from notion_client.errors import APIResponseError, HTTPResponseError, RequestTim
 
 from . import config, db
 from .notion import KO_PART, KO_ROLE
-from .operations_schema import ADMIN, LEDGER, SCHEMAS
+from .operations_schema import ADMIN, LEDGER, SCHEMAS, OPTIONAL
 
 log = logging.getLogger("attendance")
 # 노션 조회 결과를 이 시간 동안 재사용한다. 앱의 쓰기는 캐시를 직접 갱신하므로 앱 안의 변경은 즉시 반영되고,
@@ -40,6 +40,16 @@ class NotionUnavailable(Exception):
 def text_value(prop):
     return "".join(x.get("plain_text", x.get("text", {}).get("content", ""))
                    for x in prop.get(prop.get("type", "rich_text"), []))
+
+
+def missing_properties(definitions, existing, title):
+    """DB에 더할 열. 사람이 만든 빈 DB의 제목 열('이름' 등)은 새로 만들지 않고 이름만 바꾼다 — 제목 열은 하나뿐이다."""
+    missing = {k: v for k, v in definitions.items() if k not in existing}
+    if title in missing:
+        current = next(name for name, prop in existing.items() if prop["type"] == "title")
+        missing.pop(title)
+        missing[current] = {"name": title}
+    return missing
 
 
 class OperationsStore:
@@ -114,7 +124,7 @@ class OperationsStore:
             raise NotionUnavailable(f"노션 명단·출석 데이터베이스 연결을 확인해 주세요: {exc}") from exc
         existing = {}
         # 부모 페이지 스캔은 환경변수·캐시 어느 쪽에도 ID가 없는 DB가 있을 때만 (첫 설치 또는 미지정 재배포)
-        if any(not env[k] and not self.notion._get(self.conn, f"ops_{k}_id") for k in SCHEMAS if k != "attendance"):
+        if any(not env[k] and not self.notion._get(self.conn, f"ops_{k}_id") for k in SCHEMAS if k != "attendance" and k not in OPTIONAL):
             cursor = None
             while True:
                 args = {"block_id": self.notion.parent_page_id, "page_size": 100}
@@ -128,6 +138,8 @@ class OperationsStore:
                     break
                 cursor = result["next_cursor"]
         for kind, (name, fields) in SCHEMAS.items():
+            if kind in OPTIONAL and not env[kind]:
+                continue   # 지정하지 않은 선택 DB: 찾거나 만들지 않고 그 기능을 끈다 (has() 가 False)
             database_id = env[kind] or self.notion._get(self.conn, f"ops_{kind}_id") or existing.get(name)
             if kind == "attendance":
                 database_id = env[kind] or self.notion._get(self.conn, "attendance_db_id")
@@ -137,7 +149,8 @@ class OperationsStore:
                                            "single_property": {}} if typ == "relation" else {})}
             if database_id:
                 meta = self._retrieve(kind, name, database_id)
-                missing = {k: v for k, v in definitions.items() if k not in meta["properties"]}
+                title = next(label for label, typ, *_ in fields.values() if typ == "title")
+                missing = missing_properties(definitions, meta["properties"], title)
                 if missing:
                     meta = self.call(self.client.databases.update, database_id=database_id, properties=missing)
             else:
@@ -187,6 +200,9 @@ class OperationsStore:
         rows = load()
         self._cache[name] = (copy.deepcopy(rows), time.monotonic())
         return rows
+
+    def has(self, kind):
+        return kind in self.ids
 
     def read(self, kind, fresh=False):
         return self.cached(kind, fresh, lambda: [self._row(kind, page) for page in self.all_pages(self.ids[kind])])

@@ -64,7 +64,7 @@ function navigation() {
   if (music()) tabs.push(['music','지휘',s.missing_materials.length]);
   if (photos()) tabs.push(['admin','행정',s.missing_photos.length]);
   tabs.push(['finance','재정']);
-  tabs.push(['suggest','건의',s.open_suggestions||0]);
+  if (s.suggestions_enabled) tabs.push(['suggest','건의',s.open_suggestions||0]);
   document.getElementById('tabs').innerHTML = tabs.map(([path,label,n]) => `<a href="#/${path}" ${path === active || path === 'schedule' && ['event','day'].includes(active) || path === 'music' && ['song','concert'].includes(active) ? 'aria-current="page"' : ''}>${label}${badge(n)}</a>`).join('');
   let toolbar = document.getElementById('semester-toolbar');
   if (!toolbar) { toolbar = document.createElement('div'); toolbar.id='semester-toolbar'; document.getElementById('tabs').after(toolbar); }
@@ -142,7 +142,7 @@ export function operationsHome() {
   ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">${esc(s.me.name)}님, 반가워요</p><h1>오늘도, 함께 노래해요.</h1><p class="muted">우리의 다음 만남과 출석을 확인하세요.</p></section>
     ${s.missing_photos.length ? `<a class="warn notice-link" href="#/admin">사진 등록이 필요한 일정 ${s.missing_photos.length}개${badge(s.missing_photos.length)}</a>` : ''}
     ${s.missing_materials.length ? `<a class="warn notice-link" href="#/music">확인하지 않은 필수 자료 ${s.missing_materials.length}개${badge(s.missing_materials.length)}</a>` : ''}
-    ${s.open_suggestions ? `<a class="warn notice-link" href="#/suggest">처리하지 않은 건의 ${s.open_suggestions}개${badge(s.open_suggestions)}</a>` : ''}
+    ${s.suggestions_enabled&&s.open_suggestions ? `<a class="warn notice-link" href="#/suggest">처리하지 않은 건의 ${s.open_suggestions}개${badge(s.open_suggestions)}</a>` : ''}
     ${s.me.admin_role==='treasurer'&&s.finance.carry_needs_confirmation ? '<a class="warn notice-link" href="#/finance">학기 이월금을 확인해 주세요.</a>' : ''}
     ${practice&&!dup ? practiceCard(practice) : ''}
     <div class="home-overview ${conductor()?'without-stats':''}">${dup ? practiceCard(practice) : nearest}
@@ -198,13 +198,15 @@ const SUGGESTION_STATUSES=['접수','확인함','반영함','보류'];
 const SUGGESTION_CHIP={'접수':'','확인함':'late','반영함':'present','보류':'absent'};
 const executive=()=>['head','publicity','treasurer'].includes(ui.state.me.admin_role);
 const stamp=iso=>esc((iso||'').replace('T',' ').slice(0,16));
+// 실시간 갱신·처리 표시 뒤에는 화면을 새로 그린다. 쓰던 건의와 거르기 값, 요청 ID(재시도 중복 방지)는 그 사이에도 유지한다.
+let suggestDraft='', suggestRequest=crypto.randomUUID(), suggestFilter='';
 
 export function suggestionsView(){
   const s=ui.state, exec=executive(), items=s.suggestions||[];
-  let requestId=crypto.randomUUID(); // 실패 후 다시 누르면 같은 요청으로 보내 중복 저장을 막는다
+  if(!s.suggestions_enabled){ui.root.innerHTML=emptyState('건의함이 아직 연결되지 않았어요','단장에게 알려 주세요.');return;}
   ui.root.innerHTML=`<section class="page-heading"><p class="eyebrow">SUGGESTIONS</p><h1>건의함</h1><p class="muted">글리에 바라는 점을 남겨 주세요. 이름과 함께 집행부(단장·홍보·총무)에게 전달되고, 처리 상태는 아래에서 볼 수 있어요.</p></section>
-    <form class="card stack" id="suggest-form"><label>건의 내용<textarea name="body" rows="5" maxlength="2000" required placeholder="예: 연습 전날까지 악보를 올려 주면 좋겠어요"></textarea></label><p class="muted">보내는 사람 · ${esc(s.me.name)}${PART[s.me.part]?' · '+PART[s.me.part]:''}</p><button class="btn primary" data-write>보내기</button></form>
-    <section class="stack"><div class="row between"><h2>${exec?'받은 건의':'내가 보낸 건의'} <span class="count-label">${items.length}</span></h2>${exec&&items.length?`<select id="suggest-filter" aria-label="처리 상태로 거르기"><option value="">전체</option>${SUGGESTION_STATUSES.map(v=>`<option>${v}</option>`).join('')}</select>`:''}</div><div id="suggest-list"></div></section>`;
+    <form class="card stack" id="suggest-form"><label>건의 내용<textarea name="body" rows="5" maxlength="2000" required placeholder="예: 연습 전날까지 악보를 올려 주면 좋겠어요">${esc(suggestDraft)}</textarea></label><p class="muted">보내는 사람 · ${esc(s.me.name)}${PART[s.me.part]?' · '+PART[s.me.part]:''}</p><button class="btn primary" data-write>보내기</button></form>
+    <section class="stack"><div class="row between"><h2>${exec?'받은 건의':'내가 보낸 건의'} <span class="count-label">${items.length}</span></h2>${exec&&items.length?`<select id="suggest-filter" aria-label="처리 상태로 거르기"><option value="">전체</option>${SUGGESTION_STATUSES.map(v=>`<option ${v===suggestFilter?'selected':''}>${v}</option>`).join('')}</select>`:''}</div><div id="suggest-list"></div></section>`;
   const draw=()=>{
     const want=ui.root.querySelector('#suggest-filter')?.value||'';
     const shown=items.filter(x=>!want||(x.status||'접수')===want);
@@ -218,12 +220,13 @@ export function suggestionsView(){
     });
     bindActions();
   };
-  ui.root.querySelector('#suggest-filter')?.addEventListener('change',draw);
+  ui.root.querySelector('#suggest-filter')?.addEventListener('change',e=>{suggestFilter=e.target.value;draw();});
   const form=ui.root.querySelector('#suggest-form');
+  form.elements.body.oninput=e=>{suggestDraft=e.target.value;};
   form.onsubmit=async e=>{
     e.preventDefault();
     const b=form.querySelector('button');if(b.disabled)return;b.disabled=true;
-    try{await api('POST','/api/suggestions',{request_id:requestId,body:form.elements.body.value});requestId=crypto.randomUUID();form.reset();ui.toast('건의를 보냈어요');await ui.refresh();}
+    try{await api('POST','/api/suggestions',{request_id:suggestRequest,body:form.elements.body.value});suggestDraft='';suggestRequest=crypto.randomUUID();form.reset();ui.toast('건의를 보냈어요');await ui.refresh();}
     catch(err){ui.toast(err.message,true);}
     finally{b.disabled=false;}
   };

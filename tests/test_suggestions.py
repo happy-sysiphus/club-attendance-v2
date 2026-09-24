@@ -107,6 +107,9 @@ class SuggestionStore(SnapshotStore):
     def read(self, kind, fresh=False):
         return copy.deepcopy(self.rows) if kind == "suggestions" else super().read(kind, fresh)
 
+    def has(self, kind):
+        return kind == "suggestions"
+
 
 def test_snapshot_executive_sees_all_member_sees_own():
     rows = [suggestion("a", author="s", created_at="2026-09-20T09:00:00"),
@@ -121,3 +124,39 @@ def test_snapshot_executive_sees_all_member_sees_own():
     assert [x["id"] for x in mine["suggestions"]] == ["c", "a"]
     assert mine["open_suggestions"] == 0
     assert SOPRANO["admin_role"] == "" and HEAD["admin_role"] == "head"
+
+
+# ---------- 건의함 DB 를 지정하지 않은 배포 ----------
+
+
+class Unset(StubStore):
+    def has(self, kind):
+        return False
+
+
+def test_without_a_pinned_db_sending_and_marking_are_refused():
+    ops = Operations(Unset())
+    for call in (lambda: ops.save_suggestion({"suggestions": []}, PLAIN, {"body": "x", "request_id": REQUEST}),
+                 lambda: ops.mark_suggestion({"suggestions": [suggestion()]}, HEAD, "x", {"status": "확인함"})):
+        with pytest.raises(HTTPException) as exc:
+            call()
+        assert exc.value.status_code == 503
+    assert ops.store.saved == []
+
+
+def test_without_a_pinned_db_the_menu_is_hidden():
+    snap = Operations(SnapshotStore([], [])).snapshot("h")
+    assert snap["suggestions_enabled"] is False and snap["suggestions"] == [] and snap["open_suggestions"] == 0
+
+
+def test_pinned_empty_db_gets_its_title_column_renamed_not_duplicated():
+    """집행부가 노션에서 만든 빈 DB('이름' 제목 열)에 앱이 열을 채울 때 제목 열을 하나 더 만들지 않는다."""
+    from app.operations_schema import SCHEMAS
+    from app.operations_store import missing_properties
+    fields = SCHEMAS["suggestions"][1]
+    definitions = {label: {typ: {}} for label, typ, *_ in fields.values()}
+    missing = missing_properties(definitions, {"이름": {"type": "title"}}, "건의")
+    assert missing["이름"] == {"name": "건의"} and "건의" not in missing
+    assert {"내용", "작성자", "처리 상태", "처리자", "처리 시각"} <= set(missing)
+    # 앱이 만든 DB처럼 이미 다 있으면 건드리지 않는다
+    assert missing_properties(definitions, {label: {"type": typ} for label, typ, *_ in fields.values()}, "건의") == {}

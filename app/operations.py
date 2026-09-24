@@ -120,7 +120,8 @@ class Operations:
     def load(self, fresh=False):
         s = self.store
         s.bootstrap()
-        data = {kind: s.read(kind, fresh) for kind in ("semesters", "songs", "events", "materials", "acknowledgements", "attendance", "ledger", "suggestions")}
+        data = {kind: s.read(kind, fresh) for kind in ("semesters", "songs", "events", "materials", "acknowledgements", "attendance", "ledger")}
+        data["suggestions"] = s.read("suggestions", fresh) if s.has("suggestions") else []
         data["members"] = s.roster(fresh)
         # Notion permits unfinished blank rows. They are drafts, not app events.
         data["events"] = [e for e in data["events"] if e["title"] and e["starts_at"] and e["semester"] and e["category"] in ("지휘", "행정")]
@@ -245,6 +246,7 @@ class Operations:
                 mine = [x for x in data["suggestions"] if is_executive(me) or x["member"] == me["id"]]
                 result["suggestions"] = sorted(mine, key=lambda x: (x["created_at"], x["id"]), reverse=True)
                 result["open_suggestions"] = sum(1 for x in mine if x["status"] in ("", "접수")) if is_executive(me) else 0
+                result["suggestions_enabled"] = self.store.has("suggestions")
                 self.cache[(member_id, sid)] = copy.deepcopy(result)
                 self.cache[(member_id, None)] = copy.deepcopy(result)
                 return result
@@ -411,7 +413,12 @@ class Operations:
             values["key"] = operation_key(body)
         return {"id": self.store.save("ledger", values, row_id)}
 
+    def suggestions_ready(self):
+        if not self.store.has("suggestions"):
+            raise HTTPException(503, "건의함이 아직 연결되지 않았어요. 단장에게 알려 주세요")
+
     def save_suggestion(self, data, me, body):
+        self.suggestions_ready()
         content = text(body, "body", True, 2000)
         first_line = content.splitlines()[0].strip()
         values = {"key": operation_key(body), "title": first_line[:60] + ("…" if len(first_line) > 60 else ""),
@@ -420,6 +427,7 @@ class Operations:
         return {"id": self.store.save("suggestions", values)}   # 같은 request_id 재시도는 store 가 기존 행을 돌려준다
 
     def mark_suggestion(self, data, me, suggestion_id, body):
+        self.suggestions_ready()
         require(is_executive(me), "건의 처리 표시는 집행부(단장·홍보·총무)만 할 수 있어요")
         suggestion = find(data["suggestions"], suggestion_id)
         status = text(body, "status", True)

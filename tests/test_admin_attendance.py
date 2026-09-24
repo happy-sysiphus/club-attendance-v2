@@ -144,6 +144,9 @@ class SnapshotStore:
     def roster(self, fresh=False):
         return copy.deepcopy([HEAD, CONDUCTOR, SOPRANO])
 
+    def has(self, kind):
+        return False   # 건의함 미지정 배포와 같다
+
     def ensure_semester_views(self, semester):
         pass
 
